@@ -28,6 +28,22 @@ async function getSandboxStatus(agentId: string): Promise<SandboxStatus | null> 
   }
 }
 
+async function hydrate(agentId: string): Promise<void> {
+  try {
+    await fetch(`${CREWDECK_SERVICE_URL}/api/sandbox/${agentId}/hydrate`, { method: "POST" });
+  } catch {
+    // Non-fatal — agent can still run without stored configs
+  }
+}
+
+async function syncBack(agentId: string): Promise<void> {
+  try {
+    await fetch(`${CREWDECK_SERVICE_URL}/api/sandbox/${agentId}/sync-back`, { method: "POST" });
+  } catch {
+    // Non-fatal — configs will be synced on next opportunity
+  }
+}
+
 export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExecutionResult> {
   const agentId = ctx.agent.id;
 
@@ -64,10 +80,14 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     },
   };
 
+  // Hydrate sandbox with stored configs before execution
+  await hydrate(agentId);
+
   // Delegate to OpenClaw gateway adapter
   const result = await openclawExecute(overriddenCtx);
 
-  // TODO: Phase 4 — sync-back config files after run completes
+  // Sync config changes back to CrewDeck Service DB
+  await syncBack(agentId);
 
   return result;
 }
