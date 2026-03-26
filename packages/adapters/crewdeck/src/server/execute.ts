@@ -18,15 +18,27 @@ interface EnsureReadyResponse {
   error?: string;
 }
 
-async function ensureReady(agentId: string): Promise<EnsureReadyResponse | null> {
+interface EnsureReadyError {
+  ready: false;
+  error: string;
+  errorCode: string;
+}
+
+async function ensureReady(agentId: string): Promise<EnsureReadyResponse | EnsureReadyError> {
   try {
     const res = await fetch(`${CREWDECK_SERVICE_URL}/api/sandbox/${agentId}/ensure-ready`, {
       method: "POST",
     });
-    if (!res.ok) return null;
+    if (res.status === 404) {
+      return { ready: false, error: "Agent not registered with CrewDeck Service", errorCode: "crewdeck_agent_not_found" };
+    }
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      return { ready: false, error: `CrewDeck Service error (${res.status}): ${text}`, errorCode: "crewdeck_service_error" };
+    }
     return (await res.json()) as EnsureReadyResponse;
-  } catch {
-    return null;
+  } catch (err) {
+    return { ready: false, error: `CrewDeck Service unreachable: ${err instanceof Error ? err.message : String(err)}`, errorCode: "crewdeck_service_unreachable" };
   }
 }
 
@@ -43,13 +55,14 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
 
   const status = await ensureReady(agentId);
 
-  if (!status || !status.ready) {
+  if (!status.ready) {
+    const err = status as EnsureReadyError;
     return {
       exitCode: 1,
       signal: null,
       timedOut: false,
-      errorMessage: status?.error ?? "Failed to ensure sandbox is ready",
-      errorCode: "crewdeck_sandbox_not_ready",
+      errorMessage: err.error,
+      errorCode: err.errorCode,
     };
   }
 

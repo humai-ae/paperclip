@@ -8,8 +8,8 @@
     ".": "./src/index.ts"
   },
   "paperclipPlugin": {
-    "manifest": "./dist/manifest.js",
-    "worker": "./dist/worker.js"
+    "manifest": "./src/manifest.ts",
+    "worker": "./src/worker.ts"
   },
   "scripts": {
     "prebuild": "node ../../../../scripts/ensure-plugin-build-deps.mjs",

@@ -17,7 +17,7 @@ async function registerAgent(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         paperclipAgentId: event.entityId,
-        role: (payload.role as string) ?? "general",
+        role: typeof payload.role === "string" && payload.role.trim() ? payload.role.trim() : "general",
       }),
     });
 
@@ -28,7 +28,7 @@ async function registerAgent(
 
     logger.info(`Agent ${event.entityId} registered with CrewDeck Service`);
   } catch (err) {
-    logger.error(`Failed to register agent ${event.entityId}: ${err}`);
+    logger.error(`Failed to register agent ${event.entityId}: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 

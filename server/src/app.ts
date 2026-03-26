@@ -297,8 +297,11 @@ export async function createApp(
       async (pluginId) => (await pluginRegistry.getById(pluginId))?.packagePath ?? null,
     )
     : null;
-  // ── CrewDeck: auto-install crewdeck-sync plugin, then load all plugins ──
+  // ── CrewDeck: auto-install crewdeck-sync plugin if CREWDECK_SERVICE_URL is set ──
   void (async () => {
+    if (!process.env.CREWDECK_SERVICE_URL) {
+      return;
+    }
     try {
       const existing = await pluginRegistry.getByKey("crewdeck.sync");
       if (!existing || existing.status === "uninstalled") {
