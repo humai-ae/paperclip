@@ -297,7 +297,22 @@ export async function createApp(
       async (pluginId) => (await pluginRegistry.getById(pluginId))?.packagePath ?? null,
     )
     : null;
-  void loader.loadAll().then((result) => {
+  // ── CrewDeck: auto-install crewdeck-sync plugin, then load all plugins ──
+  void (async () => {
+    try {
+      const existing = await pluginRegistry.getByKey("crewdeck.sync");
+      if (!existing) {
+        const crewdeckPluginPath = path.resolve(__dirname, "../../packages/plugins/examples/plugin-crewdeck-sync");
+        if (fs.existsSync(crewdeckPluginPath)) {
+          logger.info("Auto-installing crewdeck-sync plugin...");
+          await loader.installPlugin({ localPath: crewdeckPluginPath });
+          logger.info("crewdeck-sync plugin installed");
+        }
+      }
+    } catch (err) {
+      logger.warn({ err }, "Failed to auto-install crewdeck-sync plugin");
+    }
+  })().then(() => loader.loadAll()).then((result) => {
     if (!result) return;
     for (const loaded of result.results) {
       if (devWatcher && loaded.success && loaded.plugin.packagePath) {

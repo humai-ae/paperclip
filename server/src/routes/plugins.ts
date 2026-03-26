@@ -139,6 +139,14 @@ const BUNDLED_PLUGIN_EXAMPLES: AvailablePluginExample[] = [
     localPath: "packages/plugins/examples/plugin-kitchen-sink-example",
     tag: "example",
   },
+  {
+    packageName: "@paperclipai/plugin-crewdeck-sync",
+    pluginKey: "crewdeck.sync",
+    displayName: "CrewDeck Sync",
+    description: "Automatically registers new agents with CrewDeck Service for sandbox provisioning.",
+    localPath: "packages/plugins/examples/plugin-crewdeck-sync",
+    tag: "crewdeck",
+  },
 ];
 
 function listBundledPluginExamples(): AvailablePluginExample[] {
