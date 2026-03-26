@@ -10,7 +10,7 @@ const manifest: PaperclipPluginManifestV1 = {
   description: "Automatically registers new agents with CrewDeck Service for sandbox provisioning.",
   author: "CrewDeck",
   categories: ["automation"],
-  capabilities: ["events.subscribe"],
+  capabilities: ["events.subscribe", "http.outbound"],
   entrypoints: {
     worker: "./dist/worker.js",
   },

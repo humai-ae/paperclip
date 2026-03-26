@@ -145,7 +145,7 @@ const BUNDLED_PLUGIN_EXAMPLES: AvailablePluginExample[] = [
     displayName: "CrewDeck Sync",
     description: "Automatically registers new agents with CrewDeck Service for sandbox provisioning.",
     localPath: "packages/plugins/examples/plugin-crewdeck-sync",
-    tag: "crewdeck",
+    tag: "example",
   },
 ];
 

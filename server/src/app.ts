@@ -301,7 +301,7 @@ export async function createApp(
   void (async () => {
     try {
       const existing = await pluginRegistry.getByKey("crewdeck.sync");
-      if (!existing) {
+      if (!existing || existing.status === "uninstalled") {
         const crewdeckPluginPath = path.resolve(__dirname, "../../packages/plugins/examples/plugin-crewdeck-sync");
         if (fs.existsSync(crewdeckPluginPath)) {
           logger.info("Auto-installing crewdeck-sync plugin...");
