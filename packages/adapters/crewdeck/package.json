@@ -1,0 +1,14 @@
+{
+  "name": "@paperclipai/adapter-crewdeck",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./server": "./src/server/index.ts"
+  },
+  "dependencies": {
+    "@paperclipai/adapter-openclaw-gateway": "workspace:*",
+    "@paperclipai/adapter-utils": "workspace:*"
+  }
+}
