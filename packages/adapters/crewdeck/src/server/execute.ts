@@ -100,10 +100,6 @@ function hasMeaningfulModelOutput(result: AdapterExecutionResult): boolean {
   return outputTokens > 0;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExecutionResult> {
   const agentId = ctx.agent.id;
 
@@ -160,22 +156,15 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     return { result, transient: { matched: false, message: "" } };
   };
 
-  let attempt = await runOnce();
-  let result = attempt.result;
-  let transient = attempt.transient;
+  const attempt = await runOnce();
+  const result = attempt.result;
+  const transient = attempt.transient;
 
   if (transient.matched) {
     await ctx.onLog(
       "stderr",
-      `[crewdeck] transient provider availability detected; retrying once in 5s\n`,
+      "[crewdeck] transient provider availability detected; failing this run so scheduler/manual retry can use a fresh run id\n",
     );
-    await sleep(5_000);
-    attempt = await runOnce();
-    result = attempt.result;
-    transient = attempt.transient;
-  }
-
-  if (transient.matched) {
     await syncBack(agentId);
     return {
       ...result,
