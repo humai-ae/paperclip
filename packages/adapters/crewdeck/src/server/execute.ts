@@ -11,28 +11,35 @@ import {
 
 const CREWDECK_SERVICE_URL = process.env.CREWDECK_SERVICE_URL ?? "http://localhost:3200";
 
-interface SandboxStatus {
-  ready: boolean;
-  status: string;
+interface EnsureReadySuccess {
+  ready: true;
   gatewayPort: number;
   gatewayToken: string | null;
 }
 
-async function getSandboxStatus(agentId: string): Promise<SandboxStatus | null> {
-  try {
-    const res = await fetch(`${CREWDECK_SERVICE_URL}/api/agents/${agentId}/status`);
-    if (!res.ok) return null;
-    return (await res.json()) as SandboxStatus;
-  } catch {
-    return null;
-  }
+interface EnsureReadyError {
+  ready: false;
+  error: string;
+  errorCode: string;
 }
 
-async function hydrate(agentId: string): Promise<void> {
+type EnsureReadyResult = EnsureReadySuccess | EnsureReadyError;
+
+async function ensureReady(agentId: string): Promise<EnsureReadyResult> {
   try {
-    await fetch(`${CREWDECK_SERVICE_URL}/api/sandbox/${agentId}/hydrate`, { method: "POST" });
-  } catch {
-    // Non-fatal — agent can still run without stored configs
+    const res = await fetch(`${CREWDECK_SERVICE_URL}/api/sandbox/${agentId}/ensure-ready`, {
+      method: "POST",
+    });
+    if (res.status === 404) {
+      return { ready: false, error: "Agent not registered with CrewDeck Service", errorCode: "crewdeck_agent_not_found" };
+    }
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      return { ready: false, error: `CrewDeck Service error (${res.status}): ${text}`, errorCode: "crewdeck_service_error" };
+    }
+    return (await res.json()) as EnsureReadySuccess;
+  } catch (err) {
+    return { ready: false, error: `CrewDeck Service unreachable: ${err instanceof Error ? err.message : String(err)}`, errorCode: "crewdeck_service_unreachable" };
   }
 }
 
@@ -40,53 +47,35 @@ async function syncBack(agentId: string): Promise<void> {
   try {
     await fetch(`${CREWDECK_SERVICE_URL}/api/sandbox/${agentId}/sync-back`, { method: "POST" });
   } catch {
-    // Non-fatal — configs will be synced on next opportunity
+    // non-fatal
   }
 }
 
 export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExecutionResult> {
   const agentId = ctx.agent.id;
 
-  // Check sandbox readiness with CrewDeck Service
-  const status = await getSandboxStatus(agentId);
-
-  if (!status) {
-    return {
-      exitCode: 1,
-      signal: null,
-      timedOut: false,
-      errorMessage: "Agent not registered with CrewDeck Service",
-      errorCode: "crewdeck_agent_not_found",
-    };
-  }
+  const status = await ensureReady(agentId);
 
   if (!status.ready) {
+    const err = status as EnsureReadyError;
     return {
       exitCode: 1,
       signal: null,
       timedOut: false,
-      errorMessage: `Sandbox not ready (status: ${status.status}). Will retry on next heartbeat.`,
-      errorCode: "crewdeck_sandbox_not_ready",
+      errorMessage: err.error,
+      errorCode: err.errorCode,
     };
   }
 
-  // Override adapter config with sandbox-specific gateway details
-  const overriddenCtx: AdapterExecutionContext = {
+  const result = await openclawExecute({
     ...ctx,
     config: {
       ...ctx.config,
       url: `ws://localhost:${status.gatewayPort}`,
       ...(status.gatewayToken ? { authToken: status.gatewayToken } : {}),
     },
-  };
+  });
 
-  // Hydrate sandbox with stored configs before execution
-  await hydrate(agentId);
-
-  // Delegate to OpenClaw gateway adapter
-  const result = await openclawExecute(overriddenCtx);
-
-  // Sync config changes back to CrewDeck Service DB
   await syncBack(agentId);
 
   return result;
@@ -95,6 +84,5 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
 export async function testEnvironment(
   ctx: AdapterEnvironmentTestContext,
 ): Promise<AdapterEnvironmentTestResult> {
-  // Delegate to OpenClaw's test
   return openclawTestEnvironment(ctx);
 }
