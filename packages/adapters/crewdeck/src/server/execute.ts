@@ -41,12 +41,26 @@ const GATEWAY_CONNECTIVITY_ERROR_CODES = new Set<string>([
   "openclaw_gateway_timeout",
 ]);
 
-async function ensureReady(agentId: string, runApiKey: string): Promise<EnsureReadyResult> {
+function asNonEmptyString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+async function ensureReady(
+  agentId: string,
+  runApiKey: string,
+  options: { profileAdapterType: string; model: string },
+): Promise<EnsureReadyResult> {
   try {
     const res = await fetch(`${CREWDECK_SERVICE_URL}/api/sandbox/${agentId}/ensure-ready`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ runApiKey }),
+      body: JSON.stringify({
+        runApiKey,
+        profileAdapterType: options.profileAdapterType,
+        model: options.model,
+      }),
     });
     if (res.status === 404) {
       return { ready: false, error: "Agent not registered with CrewDeck Service", errorCode: "crewdeck_agent_not_found" };
@@ -129,7 +143,27 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     };
   }
 
-  const status = await ensureReady(agentId, runApiKey);
+  const profileAdapterType = asNonEmptyString((ctx.config as Record<string, unknown>).profileAdapterType);
+  const model = asNonEmptyString((ctx.config as Record<string, unknown>).model);
+  if (!profileAdapterType) {
+    return {
+      exitCode: 1,
+      signal: null,
+      timedOut: false,
+      errorCode: "crewdeck_missing_profile_adapter_type",
+      errorMessage: "CrewDeck requires adapterConfig.profileAdapterType for strict provisioning.",
+    };
+  }
+  if (!model) {
+    return {
+      exitCode: 1,
+      signal: null,
+      timedOut: false,
+      errorCode: "crewdeck_missing_profile_model",
+      errorMessage: "CrewDeck requires adapterConfig.model for strict provisioning.",
+    };
+  }
+  const status = await ensureReady(agentId, runApiKey, { profileAdapterType, model });
 
   if (!status.ready) {
     const err = status as EnsureReadyError;
@@ -206,7 +240,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       "stderr",
       "[crewdeck] gateway connectivity failure detected; re-running ensure-ready and retrying once\n",
     );
-    const refreshed = await ensureReady(agentId, runApiKey);
+    const refreshed = await ensureReady(agentId, runApiKey, { profileAdapterType, model });
     if (refreshed.ready) {
       const retry = await runOnce(refreshed);
       if (retry.transient.matched) {

@@ -31,21 +31,23 @@ import {
   selectDefaultCompanyGoalId
 } from "../lib/onboarding-launch";
 import {
-  DEFAULT_CODEX_LOCAL_BYPASS_APPROVALS_AND_SANDBOX,
-  DEFAULT_CODEX_LOCAL_MODEL
+  DEFAULT_CODEX_LOCAL_BYPASS_APPROVALS_AND_SANDBOX
 } from "@paperclipai/adapter-codex-local";
-import { DEFAULT_CURSOR_LOCAL_MODEL } from "@paperclipai/adapter-cursor-local";
-import { DEFAULT_GEMINI_LOCAL_MODEL } from "@paperclipai/adapter-gemini-local";
 import { resolveRouteOnboardingOptions } from "../lib/onboarding-route";
 import { AsciiArtAnimation } from "./AsciiArtAnimation";
+import { OpenCodeLogoIcon } from "./OpenCodeLogoIcon";
 import {
   Building2,
   Bot,
+  Code,
+  Gem,
   ListTodo,
   Rocket,
   ArrowLeft,
   ArrowRight,
+  Terminal,
   Sparkles,
+  MousePointer2,
   Check,
   Loader2,
   ChevronDown,
@@ -54,21 +56,27 @@ import {
 
 type Step = 1 | 2 | 3 | 4;
 type AdapterType =
-  | "crewdeck"
   | "claude_local"
   | "codex_local"
   | "gemini_local"
   | "opencode_local"
   | "pi_local"
-  | "cursor"
-  | "http"
-  | "openclaw_gateway";
+  | "cursor";
 
 const DEFAULT_TASK_DESCRIPTION = `You are the CEO. You set the direction for the company.
 
 - hire a founding engineer
 - write a hiring plan
 - break the roadmap into concrete tasks and start delegating work`;
+
+const DEFAULT_MODEL_BY_PROFILE: Record<AdapterType, string> = {
+  claude_local: "anthropic/claude-opus-4-6",
+  codex_local: "openai/gpt-5.4",
+  gemini_local: "google/gemini-2.5-pro",
+  opencode_local: "openai/gpt-5.4",
+  pi_local: "anthropic/claude-opus-4-6",
+  cursor: "openai/gpt-5.4",
+};
 
 export function OnboardingWizard() {
   const { onboardingOpen, onboardingOptions, closeOnboarding } = useDialog();
@@ -108,8 +116,8 @@ export function OnboardingWizard() {
 
   // Step 2
   const [agentName, setAgentName] = useState("CEO");
-  const [adapterType, setAdapterType] = useState<AdapterType>("crewdeck");
-  const [model, setModel] = useState("");
+  const [adapterType, setAdapterType] = useState<AdapterType>("claude_local");
+  const [model, setModel] = useState(DEFAULT_MODEL_BY_PROFILE.claude_local);
   const [command, setCommand] = useState("");
   const [args, setArgs] = useState("");
   const [url, setUrl] = useState("");
@@ -120,6 +128,7 @@ export function OnboardingWizard() {
   const [forceUnsetAnthropicApiKey, setForceUnsetAnthropicApiKey] =
     useState(false);
   const [unsetAnthropicLoading, setUnsetAnthropicLoading] = useState(false);
+  const [showMoreAdapters, setShowMoreAdapters] = useState(false);
 
   // Step 3
   const [taskTitle, setTaskTitle] = useState(
@@ -279,11 +288,12 @@ export function OnboardingWizard() {
     setCompanyName("");
     setCompanyGoal("");
     setAgentName("CEO");
-    setAdapterType("crewdeck");
-    setModel("");
+    setAdapterType("claude_local");
+    setModel(DEFAULT_MODEL_BY_PROFILE.claude_local);
     setCommand("");
     setArgs("");
     setUrl("");
+    setShowMoreAdapters(false);
     setAdapterEnvResult(null);
     setAdapterEnvError(null);
     setAdapterEnvLoading(false);
@@ -309,14 +319,7 @@ export function OnboardingWizard() {
     const config = adapter.buildAdapterConfig({
       ...defaultCreateValues,
       adapterType,
-      model:
-        adapterType === "codex_local"
-          ? model || DEFAULT_CODEX_LOCAL_MODEL
-          : adapterType === "gemini_local"
-            ? model || DEFAULT_GEMINI_LOCAL_MODEL
-          : adapterType === "cursor"
-          ? model || DEFAULT_CURSOR_LOCAL_MODEL
-          : model,
+      model,
       command,
       args,
       url,
@@ -336,7 +339,10 @@ export function OnboardingWizard() {
       env.ANTHROPIC_API_KEY = { type: "plain", value: "" };
       config.env = env;
     }
-    return config;
+    return {
+      ...config,
+      profileAdapterType: adapterType,
+    };
   }
 
   async function runAdapterEnvironmentTest(
@@ -411,14 +417,13 @@ export function OnboardingWizard() {
     setLoading(true);
     setError(null);
     try {
+      const selectedModelId = model.trim();
+      if (!selectedModelId || !selectedModelId.includes("/")) {
+        setError("Model is required and must be in provider/model format.");
+        return;
+      }
+
       if (adapterType === "opencode_local") {
-        const selectedModelId = model.trim();
-        if (!selectedModelId) {
-          setError(
-            "OpenCode requires an explicit model in provider/model format."
-          );
-          return;
-        }
         if (adapterModelsError) {
           setError(
             adapterModelsError instanceof Error
@@ -434,11 +439,9 @@ export function OnboardingWizard() {
           return;
         }
         const discoveredModels = adapterModels ?? [];
-        if (!discoveredModels.some((entry) => entry.id === selectedModelId)) {
+        if (discoveredModels.length > 0 && !discoveredModels.some((entry) => entry.id === selectedModelId)) {
           setError(
-            discoveredModels.length === 0
-              ? "No OpenCode models discovered. Run `opencode models` and authenticate providers."
-              : `Configured OpenCode model is unavailable: ${selectedModelId}`
+            `Configured model is unavailable: ${selectedModelId}`
           );
           return;
         }
@@ -452,7 +455,7 @@ export function OnboardingWizard() {
       const agent = await agentsApi.create(createdCompanyId, {
         name: agentName.trim(),
         role: "ceo",
-        adapterType,
+        adapterType: "crewdeck",
         adapterConfig: buildAdapterConfig(),
         runtimeConfig: {
           heartbeat: {
@@ -742,23 +745,120 @@ export function OnboardingWizard() {
                     />
                   </div>
 
-                  {/* Adapter type — locked to CrewDeck */}
+                  {/* Adapter type radio cards */}
                   <div>
                     <label className="text-xs text-muted-foreground mb-2 block">
                       Adapter type
                     </label>
-                    <div className="grid grid-cols-1 gap-2">
-                      <div className="flex flex-col items-center gap-1.5 rounded-md border border-foreground bg-accent p-3 text-xs relative">
-                        <span className="absolute -top-1.5 right-1.5 bg-green-500 text-white text-[9px] font-semibold px-1.5 py-0.5 rounded-full leading-none">
-                          Default
-                        </span>
-                        <Bot className="h-4 w-4" />
-                        <span className="font-medium">CrewDeck (Sandboxed)</span>
-                        <span className="text-muted-foreground text-[10px]">
-                          Runs in an isolated OpenShell sandbox
-                        </span>
-                      </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        {
+                          value: "claude_local" as const,
+                          label: "Claude Code",
+                          icon: Sparkles,
+                          desc: "Local Claude agent profile",
+                          recommended: true
+                        },
+                        {
+                          value: "codex_local" as const,
+                          label: "Codex",
+                          icon: Code,
+                          desc: "Local Codex agent profile",
+                          recommended: true
+                        }
+                      ].map((opt) => (
+                        <button
+                          key={opt.value}
+                          className={cn(
+                            "flex flex-col items-center gap-1.5 rounded-md border p-3 text-xs transition-colors relative",
+                            adapterType === opt.value
+                              ? "border-foreground bg-accent"
+                              : "border-border hover:bg-accent/50"
+                          )}
+                          onClick={() => {
+                            const nextType = opt.value as AdapterType;
+                            setAdapterType(nextType);
+                            setModel(DEFAULT_MODEL_BY_PROFILE[nextType]);
+                          }}
+                        >
+                          {opt.recommended && (
+                            <span className="absolute -top-1.5 right-1.5 bg-green-500 text-white text-[9px] font-semibold px-1.5 py-0.5 rounded-full leading-none">
+                              Recommended
+                            </span>
+                          )}
+                          <opt.icon className="h-4 w-4" />
+                          <span className="font-medium">{opt.label}</span>
+                          <span className="text-muted-foreground text-[10px]">
+                            {opt.desc}
+                          </span>
+                        </button>
+                      ))}
                     </div>
+
+                    <button
+                      className="flex items-center gap-1.5 mt-3 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                      onClick={() => setShowMoreAdapters((v) => !v)}
+                    >
+                      <ChevronDown
+                        className={cn(
+                          "h-3 w-3 transition-transform",
+                          showMoreAdapters ? "rotate-0" : "-rotate-90"
+                        )}
+                      />
+                      More Agent Adapter Types
+                    </button>
+
+                    {showMoreAdapters && (
+                      <div className="grid grid-cols-2 gap-2 mt-2">
+                        {[
+                          {
+                            value: "gemini_local" as const,
+                            label: "Gemini CLI",
+                            icon: Gem,
+                            desc: "Local Gemini agent profile"
+                          },
+                          {
+                            value: "opencode_local" as const,
+                            label: "OpenCode",
+                            icon: OpenCodeLogoIcon,
+                            desc: "Local multi-provider profile"
+                          },
+                          {
+                            value: "pi_local" as const,
+                            label: "Pi",
+                            icon: Terminal,
+                            desc: "Local Pi agent profile"
+                          },
+                          {
+                            value: "cursor" as const,
+                            label: "Cursor",
+                            icon: MousePointer2,
+                            desc: "Local Cursor agent profile"
+                          }
+                        ].map((opt) => (
+                          <button
+                            key={opt.value}
+                            className={cn(
+                              "flex flex-col items-center gap-1.5 rounded-md border p-3 text-xs transition-colors relative",
+                              adapterType === opt.value
+                                ? "border-foreground bg-accent"
+                                : "border-border hover:bg-accent/50"
+                            )}
+                            onClick={() => {
+                              const nextType = opt.value as AdapterType;
+                              setAdapterType(nextType);
+                              setModel(DEFAULT_MODEL_BY_PROFILE[nextType]);
+                            }}
+                          >
+                            <opt.icon className="h-4 w-4" />
+                            <span className="font-medium">{opt.label}</span>
+                            <span className="text-muted-foreground text-[10px]">
+                              {opt.desc}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   {/* Conditional adapter fields */}
@@ -789,10 +889,7 @@ export function OnboardingWizard() {
                               >
                                 {selectedModel
                                   ? selectedModel.label
-                                  : model ||
-                                    (adapterType === "opencode_local"
-                                      ? "Select model (required)"
-                                      : "Default")}
+                                  : model || "Select model (required)"}
                               </span>
                               <ChevronDown className="h-3 w-3 text-muted-foreground" />
                             </button>
@@ -808,20 +905,6 @@ export function OnboardingWizard() {
                               onChange={(e) => setModelSearch(e.target.value)}
                               autoFocus
                             />
-                            {adapterType !== "opencode_local" && (
-                              <button
-                                className={cn(
-                                  "flex items-center gap-2 w-full px-2 py-1.5 text-sm rounded hover:bg-accent/50",
-                                  !model && "bg-accent"
-                                )}
-                                onClick={() => {
-                                  setModel("");
-                                  setModelOpen(false);
-                                }}
-                              >
-                                Default
-                              </button>
-                            )}
                             <div className="max-h-[240px] overflow-y-auto">
                               {groupedModels.map((group) => (
                                 <div
@@ -987,26 +1070,6 @@ export function OnboardingWizard() {
                     </div>
                   )}
 
-                  {(adapterType === "http" ||
-                    adapterType === "openclaw_gateway") && (
-                    <div>
-                      <label className="text-xs text-muted-foreground mb-1 block">
-                        {adapterType === "openclaw_gateway"
-                          ? "Gateway URL"
-                          : "Webhook URL"}
-                      </label>
-                      <input
-                        className="w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm font-mono outline-none focus:ring-1 focus:ring-ring placeholder:text-muted-foreground/50"
-                        placeholder={
-                          adapterType === "openclaw_gateway"
-                            ? "ws://127.0.0.1:18789"
-                            : "https://..."
-                        }
-                        value={url}
-                        onChange={(e) => setUrl(e.target.value)}
-                      />
-                    </div>
-                  )}
                 </div>
               )}
 

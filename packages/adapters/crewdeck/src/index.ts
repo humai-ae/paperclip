@@ -14,10 +14,17 @@ export const agentConfigurationDoc = `
 This agent runs in an isolated OpenShell sandbox managed by CrewDeck Service.
 Sandbox provisioning, config hydration, and sync-back are handled automatically.
 
-No configuration needed — the adapter is pre-configured for your environment.
+Optional config:
+- profileAdapterType: selected local adapter profile from onboarding/create flow
+- model: preferred provider/model (for example anthropic/claude-opus-4-6)
 `;
 
 export const models = [
   { id: "anthropic/claude-opus-4-6", label: "Claude Opus 4.6" },
   { id: "anthropic/claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
+  { id: "openai/gpt-5.4", label: "GPT-5.4" },
+  { id: "openai/gpt-5.3-codex", label: "GPT-5.3 Codex" },
+  { id: "google/gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+  { id: "google/gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+  { id: "xai/grok-4", label: "Grok 4" },
 ];
