@@ -36,10 +36,17 @@ const TRANSIENT_PROVIDER_PATTERNS: RegExp[] = [
   /\btry\s+again\s+(?:later|soon)\b/i,
 ];
 
-async function ensureReady(agentId: string): Promise<EnsureReadyResult> {
+const GATEWAY_CONNECTIVITY_ERROR_CODES = new Set<string>([
+  "openclaw_gateway_request_failed",
+  "openclaw_gateway_timeout",
+]);
+
+async function ensureReady(agentId: string, runApiKey: string): Promise<EnsureReadyResult> {
   try {
     const res = await fetch(`${CREWDECK_SERVICE_URL}/api/sandbox/${agentId}/ensure-ready`, {
       method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ runApiKey }),
     });
     if (res.status === 404) {
       return { ready: false, error: "Agent not registered with CrewDeck Service", errorCode: "crewdeck_agent_not_found" };
@@ -100,10 +107,29 @@ function hasMeaningfulModelOutput(result: AdapterExecutionResult): boolean {
   return outputTokens > 0;
 }
 
+function isGatewayConnectivityFailure(result: AdapterExecutionResult): boolean {
+  const code = typeof result.errorCode === "string" ? result.errorCode : "";
+  if (!GATEWAY_CONNECTIVITY_ERROR_CODES.has(code)) return false;
+  if (hasMeaningfulModelOutput(result)) return false;
+  const message = (typeof result.errorMessage === "string" ? result.errorMessage : "").trim().toLowerCase();
+  if (!message) return true;
+  return /websocket|gateway|connect|connection|socket|refused|not connected|closed/.test(message);
+}
+
 export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExecutionResult> {
   const agentId = ctx.agent.id;
+  const runApiKey = typeof ctx.authToken === "string" ? ctx.authToken.trim() : "";
+  if (!runApiKey) {
+    return {
+      exitCode: 1,
+      signal: null,
+      timedOut: false,
+      errorMessage: "CrewDeck requires a Paperclip run API token in auth context for ensure-ready.",
+      errorCode: "crewdeck_missing_run_api_key",
+    };
+  }
 
-  const status = await ensureReady(agentId);
+  const status = await ensureReady(agentId, runApiKey);
 
   if (!status.ready) {
     const err = status as EnsureReadyError;
@@ -116,16 +142,15 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     };
   }
 
-  const runConfig = {
-    ...ctx.config,
-    url: `ws://localhost:${status.gatewayPort}`,
-    ...(status.gatewayToken ? { authToken: status.gatewayToken } : {}),
-  };
-
-  const runOnce = async (): Promise<{
+  const runOnce = async (ready: EnsureReadySuccess): Promise<{
     result: AdapterExecutionResult;
     transient: { matched: boolean; message: string };
   }> => {
+    const runConfig = {
+      ...ctx.config,
+      url: `ws://localhost:${ready.gatewayPort}`,
+      ...(ready.gatewayToken ? { authToken: ready.gatewayToken } : {}),
+    };
     let transientFromLogs: string | null = null;
     const result = await openclawExecute({
       ...ctx,
@@ -156,7 +181,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     return { result, transient: { matched: false, message: "" } };
   };
 
-  const attempt = await runOnce();
+  const attempt = await runOnce(status);
   const result = attempt.result;
   const transient = attempt.transient;
 
@@ -174,6 +199,34 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       errorCode: "crewdeck_provider_unavailable",
       errorMessage: result.errorMessage ?? transient.message,
     };
+  }
+
+  if (isGatewayConnectivityFailure(result)) {
+    await ctx.onLog(
+      "stderr",
+      "[crewdeck] gateway connectivity failure detected; re-running ensure-ready and retrying once\n",
+    );
+    const refreshed = await ensureReady(agentId, runApiKey);
+    if (refreshed.ready) {
+      const retry = await runOnce(refreshed);
+      if (retry.transient.matched) {
+        await ctx.onLog(
+          "stderr",
+          "[crewdeck] transient provider availability detected after connectivity retry; failing run for retry\n",
+        );
+        await syncBack(agentId);
+        return {
+          ...retry.result,
+          exitCode: 1,
+          signal: null,
+          timedOut: false,
+          errorCode: "crewdeck_provider_unavailable",
+          errorMessage: retry.result.errorMessage ?? retry.transient.message,
+        };
+      }
+      await syncBack(agentId);
+      return retry.result;
+    }
   }
 
   await syncBack(agentId);

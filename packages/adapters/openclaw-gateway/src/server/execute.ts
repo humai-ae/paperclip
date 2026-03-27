@@ -631,7 +631,8 @@ class GatewayWsClient {
     });
 
     ws.on("error", (err) => {
-      const message = err instanceof Error ? err.message : String(err);
+      const rawMessage = err instanceof Error ? err.message : String(err);
+      const message = rawMessage.trim().length > 0 ? rawMessage : "unknown websocket error";
       void this.opts.onLog("stderr", `[openclaw-gateway] websocket error: ${message}\n`);
     });
 
@@ -1066,7 +1067,6 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
 
   const templateMessage = nonEmpty(payloadTemplate.message) ?? nonEmpty(payloadTemplate.text);
   const message = templateMessage ? appendWakeText(templateMessage, wakeText) : wakeText;
-  const paperclipPayload = buildStandardPaperclipPayload(ctx, wakePayload, paperclipEnv, payloadTemplate);
 
   const agentParams: Record<string, unknown> = {
     ...payloadTemplate,
@@ -1368,7 +1368,8 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         ...(summary ? { summary } : {}),
       };
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const rawMessage = err instanceof Error ? err.message : String(err);
+      const message = rawMessage.trim().length > 0 ? rawMessage : "gateway request failed";
       const lower = message.toLowerCase();
       const timedOut = lower.includes("timeout");
       const pairingRequired = lower.includes("pairing required");
