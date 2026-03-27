@@ -303,14 +303,21 @@ export async function createApp(
       return;
     }
     try {
-      const existing = await pluginRegistry.getByKey("crewdeck.sync");
-      if (!existing || existing.status === "uninstalled") {
+      let crewdeckSync = await pluginRegistry.getByKey("crewdeck.sync");
+      if (!crewdeckSync || crewdeckSync.status === "uninstalled") {
         const crewdeckPluginPath = path.resolve(__dirname, "../../packages/plugins/examples/plugin-crewdeck-sync");
         if (fs.existsSync(crewdeckPluginPath)) {
           logger.info("Auto-installing crewdeck-sync plugin...");
           await loader.installPlugin({ localPath: crewdeckPluginPath });
           logger.info("crewdeck-sync plugin installed");
+          crewdeckSync = await pluginRegistry.getByKey("crewdeck.sync");
         }
+      }
+
+      // Auto-install leaves plugins in "installed". Move to "ready" so loadAll activates it.
+      if (crewdeckSync && crewdeckSync.status !== "ready") {
+        await pluginRegistry.updateStatus(crewdeckSync.id, { status: "ready" });
+        logger.info({ pluginId: crewdeckSync.id }, "crewdeck-sync plugin marked ready");
       }
     } catch (err) {
       logger.warn({ err }, "Failed to auto-install crewdeck-sync plugin");
