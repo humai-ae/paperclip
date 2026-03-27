@@ -463,6 +463,30 @@ describe("openclaw gateway adapter execute", () => {
     }
   });
 
+  it("falls back to claim-file instructions when local run jwt is not injected", async () => {
+    const gateway = await createMockGatewayServer();
+
+    try {
+      const result = await execute(
+        buildContext({
+          url: gateway.url,
+          headers: {
+            "x-openclaw-token": "gateway-token",
+          },
+          waitTimeoutMs: 2000,
+        }),
+      );
+
+      expect(result.exitCode).toBe(0);
+      const payload = gateway.getAgentPayload();
+      expect(payload).toBeTruthy();
+      expect(String(payload?.message ?? "")).toContain("paperclip-claimed-api-key.json");
+      expect(String(payload?.message ?? "")).toContain("PAPERCLIP_API_KEY=<token from");
+    } finally {
+      await gateway.close();
+    }
+  });
+
   it("fails fast when url is missing", async () => {
     const result = await execute(buildContext({}));
     expect(result.exitCode).toBe(1);

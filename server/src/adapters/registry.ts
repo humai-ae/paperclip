@@ -15,7 +15,7 @@ const crewdeckAdapter: ServerAdapterModule = {
   execute: crewdeckExecute,
   testEnvironment: crewdeckTestEnvironment,
   models: crewdeckModels,
-  supportsLocalAgentJwt: false,
+  supportsLocalAgentJwt: true,
   agentConfigurationDoc: crewdeckAgentConfigurationDoc,
 };
 
