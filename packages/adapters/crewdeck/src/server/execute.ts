@@ -25,6 +25,17 @@ interface EnsureReadyError {
 
 type EnsureReadyResult = EnsureReadySuccess | EnsureReadyError;
 
+const TRANSIENT_PROVIDER_PATTERNS: RegExp[] = [
+  /\b(?:service|model|provider)\s+unavailable\b/i,
+  /\btemporar(?:y|ily)\s+unavailable\b/i,
+  /\boverloaded\b/i,
+  /\bcapacity\b/i,
+  /\brate\s*limit(?:ed)?\b/i,
+  /\btoo\s+many\s+requests\b/i,
+  /\bHTTP\s*429\b/i,
+  /\btry\s+again\s+(?:later|soon)\b/i,
+];
+
 async function ensureReady(agentId: string): Promise<EnsureReadyResult> {
   try {
     const res = await fetch(`${CREWDECK_SERVICE_URL}/api/sandbox/${agentId}/ensure-ready`, {
@@ -51,6 +62,48 @@ async function syncBack(agentId: string): Promise<void> {
   }
 }
 
+function looksLikeTransientProviderFailure(result: AdapterExecutionResult): { matched: boolean; message: string } {
+  const fragments = [
+    typeof result.errorMessage === "string" ? result.errorMessage : "",
+    typeof result.summary === "string" ? result.summary : "",
+  ];
+
+  if (result.resultJson) {
+    fragments.push(JSON.stringify(result.resultJson));
+  }
+
+  const haystack = fragments.filter(Boolean).join("\n");
+  const match = TRANSIENT_PROVIDER_PATTERNS.find((pattern) => pattern.test(haystack));
+  return {
+    matched: Boolean(match),
+    message: match
+      ? `Upstream model/provider unavailable (${match.source}).`
+      : "",
+  };
+}
+
+function firstMatchingTransientLine(text: string): string | null {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  for (const line of lines) {
+    if (TRANSIENT_PROVIDER_PATTERNS.some((pattern) => pattern.test(line))) return line;
+  }
+  return null;
+}
+
+function hasMeaningfulModelOutput(result: AdapterExecutionResult): boolean {
+  const summary = typeof result.summary === "string" ? result.summary.trim() : "";
+  if (summary.length > 0) return true;
+  const outputTokens = result.usage?.outputTokens ?? 0;
+  return outputTokens > 0;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExecutionResult> {
   const agentId = ctx.agent.id;
 
@@ -67,14 +120,72 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     };
   }
 
-  const result = await openclawExecute({
-    ...ctx,
-    config: {
-      ...ctx.config,
-      url: `ws://localhost:${status.gatewayPort}`,
-      ...(status.gatewayToken ? { authToken: status.gatewayToken } : {}),
-    },
-  });
+  const runConfig = {
+    ...ctx.config,
+    url: `ws://localhost:${status.gatewayPort}`,
+    ...(status.gatewayToken ? { authToken: status.gatewayToken } : {}),
+  };
+
+  const runOnce = async (): Promise<{
+    result: AdapterExecutionResult;
+    transient: { matched: boolean; message: string };
+  }> => {
+    let transientFromLogs: string | null = null;
+    const result = await openclawExecute({
+      ...ctx,
+      onLog: async (stream, chunk) => {
+        if (transientFromLogs === null && (stream === "stderr" || stream === "stdout")) {
+          transientFromLogs = firstMatchingTransientLine(chunk);
+        }
+        await ctx.onLog(stream, chunk);
+      },
+      config: runConfig,
+    });
+
+    const transientFromResult = looksLikeTransientProviderFailure(result);
+    if (transientFromResult.matched) {
+      return { result, transient: transientFromResult };
+    }
+
+    if (transientFromLogs && !hasMeaningfulModelOutput(result)) {
+      return {
+        result,
+        transient: {
+          matched: true,
+          message: `Upstream model/provider unavailable (${transientFromLogs}).`,
+        },
+      };
+    }
+
+    return { result, transient: { matched: false, message: "" } };
+  };
+
+  let attempt = await runOnce();
+  let result = attempt.result;
+  let transient = attempt.transient;
+
+  if (transient.matched) {
+    await ctx.onLog(
+      "stderr",
+      `[crewdeck] transient provider availability detected; retrying once in 5s\n`,
+    );
+    await sleep(5_000);
+    attempt = await runOnce();
+    result = attempt.result;
+    transient = attempt.transient;
+  }
+
+  if (transient.matched) {
+    await syncBack(agentId);
+    return {
+      ...result,
+      exitCode: 1,
+      signal: null,
+      timedOut: false,
+      errorCode: "crewdeck_provider_unavailable",
+      errorMessage: result.errorMessage ?? transient.message,
+    };
+  }
 
   await syncBack(agentId);
 
