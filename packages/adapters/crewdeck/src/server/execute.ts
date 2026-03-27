@@ -11,11 +11,10 @@ import {
 
 const CREWDECK_SERVICE_URL = process.env.CREWDECK_SERVICE_URL ?? "http://localhost:3200";
 
-interface EnsureReadyResponse {
-  ready: boolean;
+interface EnsureReadySuccess {
+  ready: true;
   gatewayPort: number;
   gatewayToken: string | null;
-  error?: string;
 }
 
 interface EnsureReadyError {
@@ -24,7 +23,9 @@ interface EnsureReadyError {
   errorCode: string;
 }
 
-async function ensureReady(agentId: string): Promise<EnsureReadyResponse | EnsureReadyError> {
+type EnsureReadyResult = EnsureReadySuccess | EnsureReadyError;
+
+async function ensureReady(agentId: string): Promise<EnsureReadyResult> {
   try {
     const res = await fetch(`${CREWDECK_SERVICE_URL}/api/sandbox/${agentId}/ensure-ready`, {
       method: "POST",
@@ -36,7 +37,7 @@ async function ensureReady(agentId: string): Promise<EnsureReadyResponse | Ensur
       const text = await res.text().catch(() => "");
       return { ready: false, error: `CrewDeck Service error (${res.status}): ${text}`, errorCode: "crewdeck_service_error" };
     }
-    return (await res.json()) as EnsureReadyResponse;
+    return (await res.json()) as EnsureReadySuccess;
   } catch (err) {
     return { ready: false, error: `CrewDeck Service unreachable: ${err instanceof Error ? err.message : String(err)}`, errorCode: "crewdeck_service_unreachable" };
   }

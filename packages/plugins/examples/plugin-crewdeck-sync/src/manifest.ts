@@ -12,7 +12,7 @@ const manifest: PaperclipPluginManifestV1 = {
   categories: ["automation"],
   capabilities: ["events.subscribe", "http.outbound"],
   entrypoints: {
-    worker: "./dist/worker.js",
+    worker: "./src/worker.ts",
   },
 };
 
