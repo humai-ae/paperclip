@@ -40,6 +40,14 @@ const GATEWAY_CONNECTIVITY_ERROR_CODES = new Set<string>([
   "openclaw_gateway_request_failed",
   "openclaw_gateway_timeout",
 ]);
+const LOCAL_PROFILE_ADAPTER_TYPES = new Set([
+  "claude_local",
+  "codex_local",
+  "gemini_local",
+  "opencode_local",
+  "pi_local",
+  "cursor",
+]);
 
 function asNonEmptyString(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -143,7 +151,18 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     };
   }
 
-  const profileAdapterType = asNonEmptyString((ctx.config as Record<string, unknown>).profileAdapterType);
+  const configuredProfileAdapterType = asNonEmptyString((ctx.config as Record<string, unknown>).profileAdapterType);
+  const agentAdapterType = asNonEmptyString(ctx.agent.adapterType);
+  const fallbackProfileAdapterType = agentAdapterType && LOCAL_PROFILE_ADAPTER_TYPES.has(agentAdapterType)
+    ? agentAdapterType
+    : null;
+  const profileAdapterType = configuredProfileAdapterType ?? fallbackProfileAdapterType;
+  if (!configuredProfileAdapterType && fallbackProfileAdapterType) {
+    await ctx.onLog(
+      "stderr",
+      `[crewdeck] adapterConfig.profileAdapterType missing; inferred '${fallbackProfileAdapterType}' from agent.adapterType for ensure-ready\n`,
+    );
+  }
   const model = asNonEmptyString((ctx.config as Record<string, unknown>).model);
   if (!profileAdapterType) {
     return {
