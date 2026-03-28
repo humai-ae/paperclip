@@ -34,6 +34,10 @@ import {
   DEFAULT_CODEX_LOCAL_BYPASS_APPROVALS_AND_SANDBOX
 } from "@paperclipai/adapter-codex-local";
 import { resolveRouteOnboardingOptions } from "../lib/onboarding-route";
+import {
+  type LocalProfileAdapterType,
+  LOCAL_PROFILE_DEFAULT_MODEL_BY_TYPE,
+} from "../lib/agent-profile-defaults";
 import { AsciiArtAnimation } from "./AsciiArtAnimation";
 import { OpenCodeLogoIcon } from "./OpenCodeLogoIcon";
 import {
@@ -55,28 +59,12 @@ import {
 } from "lucide-react";
 
 type Step = 1 | 2 | 3 | 4;
-type AdapterType =
-  | "claude_local"
-  | "codex_local"
-  | "gemini_local"
-  | "opencode_local"
-  | "pi_local"
-  | "cursor";
 
 const DEFAULT_TASK_DESCRIPTION = `You are the CEO. You set the direction for the company.
 
 - hire a founding engineer
 - write a hiring plan
 - break the roadmap into concrete tasks and start delegating work`;
-
-const DEFAULT_MODEL_BY_PROFILE: Record<AdapterType, string> = {
-  claude_local: "anthropic/claude-opus-4-6",
-  codex_local: "openai/gpt-5.4",
-  gemini_local: "google/gemini-2.5-pro",
-  opencode_local: "openai/gpt-5.4",
-  pi_local: "anthropic/claude-opus-4-6",
-  cursor: "openai/gpt-5.4",
-};
 
 export function OnboardingWizard() {
   const { onboardingOpen, onboardingOptions, closeOnboarding } = useDialog();
@@ -116,8 +104,8 @@ export function OnboardingWizard() {
 
   // Step 2
   const [agentName, setAgentName] = useState("CEO");
-  const [adapterType, setAdapterType] = useState<AdapterType>("claude_local");
-  const [model, setModel] = useState(DEFAULT_MODEL_BY_PROFILE.claude_local);
+  const [adapterType, setAdapterType] = useState<LocalProfileAdapterType>("claude_local");
+  const [model, setModel] = useState(LOCAL_PROFILE_DEFAULT_MODEL_BY_TYPE.claude_local);
   const [command, setCommand] = useState("");
   const [args, setArgs] = useState("");
   const [url, setUrl] = useState("");
@@ -289,7 +277,7 @@ export function OnboardingWizard() {
     setCompanyGoal("");
     setAgentName("CEO");
     setAdapterType("claude_local");
-    setModel(DEFAULT_MODEL_BY_PROFILE.claude_local);
+    setModel(LOCAL_PROFILE_DEFAULT_MODEL_BY_TYPE.claude_local);
     setCommand("");
     setArgs("");
     setUrl("");
@@ -776,9 +764,9 @@ export function OnboardingWizard() {
                               : "border-border hover:bg-accent/50"
                           )}
                           onClick={() => {
-                            const nextType = opt.value as AdapterType;
+                            const nextType = opt.value as LocalProfileAdapterType;
                             setAdapterType(nextType);
-                            setModel(DEFAULT_MODEL_BY_PROFILE[nextType]);
+                            setModel(LOCAL_PROFILE_DEFAULT_MODEL_BY_TYPE[nextType]);
                           }}
                         >
                           {opt.recommended && (
@@ -845,9 +833,9 @@ export function OnboardingWizard() {
                                 : "border-border hover:bg-accent/50"
                             )}
                             onClick={() => {
-                              const nextType = opt.value as AdapterType;
+                              const nextType = opt.value as LocalProfileAdapterType;
                               setAdapterType(nextType);
-                              setModel(DEFAULT_MODEL_BY_PROFILE[nextType]);
+                              setModel(LOCAL_PROFILE_DEFAULT_MODEL_BY_TYPE[nextType]);
                             }}
                           >
                             <opt.icon className="h-4 w-4" />

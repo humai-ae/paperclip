@@ -43,6 +43,7 @@ import { ChoosePathButton } from "./PathInstructionsModal";
 import { OpenCodeLogoIcon } from "./OpenCodeLogoIcon";
 import { ReportsToPicker } from "./ReportsToPicker";
 import { shouldShowLegacyWorkingDirectoryField } from "../lib/legacy-agent-config";
+import { LOCAL_PROFILE_DEFAULT_MODEL_BY_TYPE } from "../lib/agent-profile-defaults";
 
 /* ---- Create mode values ---- */
 
@@ -161,14 +162,8 @@ const claudeThinkingEffortOptions = [
   { id: "high", label: "High" },
 ] as const;
 
-const STRICT_DEFAULT_MODEL_BY_PROFILE: Partial<Record<CreateConfigValues["adapterType"], string>> = {
-  claude_local: "anthropic/claude-opus-4-6",
-  codex_local: "openai/gpt-5.4",
-  gemini_local: "google/gemini-2.5-pro",
-  opencode_local: "openai/gpt-5.4",
-  pi_local: "anthropic/claude-opus-4-6",
-  cursor: "openai/gpt-5.4",
-};
+const STRICT_DEFAULT_MODEL_BY_PROFILE =
+  LOCAL_PROFILE_DEFAULT_MODEL_BY_TYPE as Partial<Record<CreateConfigValues["adapterType"], string>>;
 
 
 /* ---- Form ---- */

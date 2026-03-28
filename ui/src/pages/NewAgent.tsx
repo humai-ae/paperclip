@@ -21,37 +21,22 @@ import { AgentConfigForm, type CreateConfigValues } from "../components/AgentCon
 import { defaultCreateValues } from "../components/agent-config-defaults";
 import { getUIAdapter } from "../adapters";
 import { ReportsToPicker } from "../components/ReportsToPicker";
+import {
+  type LocalProfileAdapterType,
+  isLocalProfileAdapterType,
+  LOCAL_PROFILE_DEFAULT_MODEL_BY_TYPE,
+} from "../lib/agent-profile-defaults";
 
-const ADVANCED_ADAPTER_TYPES = [
-  "claude_local",
-  "codex_local",
-  "gemini_local",
-  "opencode_local",
-  "pi_local",
-  "cursor",
-] as const;
-
-type AdvancedAdapterType = (typeof ADVANCED_ADAPTER_TYPES)[number];
-
-const SUPPORTED_ADVANCED_ADAPTER_TYPES = new Set<AdvancedAdapterType>(ADVANCED_ADAPTER_TYPES);
-
-const DEFAULT_MODEL_BY_PROFILE: Record<AdvancedAdapterType, string> = {
-  claude_local: "anthropic/claude-opus-4-6",
-  codex_local: "openai/gpt-5.4",
-  gemini_local: "google/gemini-2.5-pro",
-  opencode_local: "openai/gpt-5.4",
-  pi_local: "anthropic/claude-opus-4-6",
-  cursor: "openai/gpt-5.4",
-};
+type AdvancedAdapterType = LocalProfileAdapterType;
 
 function isAdvancedAdapterType(value: string): value is AdvancedAdapterType {
-  return SUPPORTED_ADVANCED_ADAPTER_TYPES.has(value as AdvancedAdapterType);
+  return isLocalProfileAdapterType(value);
 }
 
 function createValuesForAdapterType(adapterType: AdvancedAdapterType): CreateConfigValues {
   const { adapterType: _discard, ...defaults } = defaultCreateValues;
   const nextValues: CreateConfigValues = { ...defaults, adapterType };
-  nextValues.model = DEFAULT_MODEL_BY_PROFILE[adapterType];
+  nextValues.model = LOCAL_PROFILE_DEFAULT_MODEL_BY_TYPE[adapterType];
   return nextValues;
 }
 
