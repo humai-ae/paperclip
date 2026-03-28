@@ -319,11 +319,26 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   }> => {
     const configuredPaperclipApiUrl = asNonEmptyString((ctx.config as Record<string, unknown>).paperclipApiUrl);
     const paperclipApiUrl = configuredPaperclipApiUrl ?? resolveSandboxPaperclipApiUrl();
+    const existingTemplate = (ctx.config as Record<string, unknown>).payloadTemplate as Record<string, unknown> | undefined;
+    const existingMessage = typeof existingTemplate?.message === "string" ? existingTemplate.message : "";
+    const completionSignal = [
+      "IMPORTANT — Completion signal:",
+      "When ALL work is finished (including any sub-agent work), output exactly:",
+      "  CREWDECK_RUN_COMPLETE",
+      "This MUST be in your final response. Without it, the run is marked incomplete.",
+      "If you delegate to sub-agents, wait for them to finish before outputting this signal.",
+    ].join("\n");
     const runConfig = {
       ...ctx.config,
       url: `ws://localhost:${ready.gatewayPort}`,
       ...(ready.gatewayToken ? { authToken: ready.gatewayToken } : {}),
       ...(paperclipApiUrl ? { paperclipApiUrl } : {}),
+      payloadTemplate: {
+        ...(existingTemplate ?? {}),
+        message: existingMessage
+          ? `${existingMessage}\n\n${completionSignal}`
+          : completionSignal,
+      },
     };
     let transientFromLogs: string | null = null;
     let authFromLogs: string | null = null;

@@ -407,12 +407,6 @@ function buildWakeText(payload: WakePayload, paperclipEnv: Record<string, string
     "- POST /api/companies/{companyId}/issues (when asked to create a new issue)",
     "",
     "Complete the workflow in this run.",
-    "",
-    "IMPORTANT — Completion signal:",
-    "When ALL work is finished (including any sub-agent work), output exactly:",
-    "  CREWDECK_RUN_COMPLETE",
-    "This MUST be in your final response. Without it, the run is marked incomplete.",
-    "If you delegate to sub-agents, wait for them to finish before outputting this signal.",
   ];
   return lines.join("\n");
 }
