@@ -16,6 +16,10 @@ interface EnsureReadySuccess {
   ready: true;
   gatewayPort: number;
   gatewayToken: string | null;
+  sandboxCreated?: boolean;
+  workspaceRestored?: boolean;
+  gatewayStarted?: boolean;
+  forwardStarted?: boolean;
 }
 
 interface EnsureReadyError {
