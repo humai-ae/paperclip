@@ -2,19 +2,18 @@
  * CrewDeck adapter — thin shim that routes execution through CrewDeck Service.
  *
  * CrewDeck Service handles:
- * - Sandbox readiness gating
- * - Config hydration (SOULS.md, TOOLS.md, SKILLS)
+ * - Sandbox readiness gating and provisioning
  * - OpenClaw gateway routing (per-agent sandbox)
- * - Config sync-back after runs
+ * - Snapshot restore/export of OpenClaw filesystem state
  */
 
 export const agentConfigurationDoc = `
 ## CrewDeck Adapter
 
 This agent runs in an isolated OpenShell sandbox managed by CrewDeck Service.
-Sandbox provisioning, config hydration, and sync-back are handled automatically.
+Sandbox provisioning, snapshot restore, and sync-back are handled automatically.
 
-Optional config:
+Required config:
 - profileAdapterType: selected local adapter profile from onboarding/create flow
 - model: preferred provider/model (for example anthropic/claude-opus-4-6)
 `;
