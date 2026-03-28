@@ -46,5 +46,5 @@ export function listServerAdapters(): ServerAdapterModule[] {
 }
 
 export function findServerAdapter(type: string): ServerAdapterModule | null {
-  return adaptersByType.get(type) ?? crewdeckAdapter;
+  return adaptersByType.get(type) ?? null;
 }
