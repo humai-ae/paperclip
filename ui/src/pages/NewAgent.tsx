@@ -125,9 +125,13 @@ export function NewAgent() {
 
   function buildAdapterConfig() {
     const adapter = getUIAdapter(configValues.adapterType);
+    const profileAdapterType = isLocalProfileAdapterType(configValues.adapterType)
+      ? configValues.adapterType
+      : "claude_local";
     return {
       ...adapter.buildAdapterConfig(configValues),
-      profileAdapterType: configValues.adapterType,
+      model: configValues.model,
+      profileAdapterType,
     };
   }
 
