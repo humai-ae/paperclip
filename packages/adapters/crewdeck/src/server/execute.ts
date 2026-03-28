@@ -96,36 +96,16 @@ function resolveSandboxPaperclipApiUrl(): string {
   }
 }
 
-async function readNdjsonStream(
-  res: Response,
+async function logSteps(
+  result: Record<string, unknown>,
   onLog?: (stream: "stdout" | "stderr", msg: string) => Promise<void>,
-): Promise<EnsureReadyResult> {
-  const body = await res.text();
-  const lines = body.split("\n").filter(Boolean);
-  let result: EnsureReadyResult | null = null;
-
-  for (const line of lines) {
-    try {
-      const event = JSON.parse(line) as Record<string, unknown>;
-      if (event.type === "step" && onLog) {
-        await onLog("stdout", `[crewdeck] ${event.step}: ${event.status}\n`);
-      } else if (event.type === "result") {
-        if (event.ready) {
-          result = event as unknown as EnsureReadySuccess;
-        } else {
-          return {
-            ready: false,
-            error: typeof event.error === "string" ? event.error : "Request failed",
-            errorCode: "crewdeck_service_error",
-          } as EnsureReadyError;
-        }
-      }
-    } catch {
-      // Skip malformed lines
+): Promise<void> {
+  if (!onLog || !Array.isArray(result.steps)) return;
+  for (const step of result.steps) {
+    if (typeof step === "string") {
+      await onLog("stdout", `[crewdeck] ${step}\n`);
     }
   }
-
-  return result ?? { ready: false, error: "No result from service", errorCode: "crewdeck_service_error" };
 }
 
 async function ensureReady(
@@ -141,30 +121,22 @@ async function ensureReady(
       method: "POST",
       headers: { "content-type": "application/json" },
       signal: controller.signal,
-      body: JSON.stringify({
-        runApiKey,
-        profileAdapterType: options.profileAdapterType,
-        model: options.model,
-      }),
+      body: JSON.stringify({ runApiKey, profileAdapterType: options.profileAdapterType, model: options.model }),
     });
     if (res.status === 404) {
       return { ready: false, error: "Agent not registered with CrewDeck Service", errorCode: "crewdeck_agent_not_found" };
     }
-    if (res.headers.get("content-type")?.includes("ndjson")) {
-      return await readNdjsonStream(res, onLog);
-    }
     if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      return { ready: false, error: `CrewDeck Service error (${res.status}): ${text}`, errorCode: "crewdeck_service_error" };
+      const json = await res.json().catch(() => null) as Record<string, unknown> | null;
+      if (json) await logSteps(json, onLog);
+      return { ready: false, error: typeof json?.error === "string" ? json.error : `CrewDeck Service error (${res.status})`, errorCode: "crewdeck_service_error" };
     }
-    return (await res.json()) as EnsureReadySuccess;
+    const json = await res.json() as Record<string, unknown>;
+    await logSteps(json, onLog);
+    return json as unknown as EnsureReadySuccess;
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {
-      return {
-        ready: false,
-        error: `CrewDeck Service timed out after ${Math.round(ENSURE_READY_TIMEOUT_MS / 1000)}s during ensure-ready`,
-        errorCode: "crewdeck_service_timeout",
-      };
+      return { ready: false, error: `CrewDeck Service timed out after ${Math.round(ENSURE_READY_TIMEOUT_MS / 1000)}s during ensure-ready`, errorCode: "crewdeck_service_timeout" };
     }
     return { ready: false, error: `CrewDeck Service unreachable: ${err instanceof Error ? err.message : String(err)}`, errorCode: "crewdeck_service_unreachable" };
   } finally {
@@ -191,14 +163,14 @@ async function ensureConnectivity(
     if (res.status === 404) {
       return { ready: false, error: "Agent not registered with CrewDeck Service", errorCode: "crewdeck_agent_not_found" };
     }
-    if (res.headers.get("content-type")?.includes("ndjson")) {
-      return await readNdjsonStream(res, onLog);
-    }
     if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      return { ready: false, error: `Connectivity check failed (${res.status}): ${text}`, errorCode: "crewdeck_connectivity_error" };
+      const json = await res.json().catch(() => null) as Record<string, unknown> | null;
+      if (json) await logSteps(json, onLog);
+      return { ready: false, error: typeof json?.error === "string" ? json.error : `Connectivity check failed (${res.status})`, errorCode: "crewdeck_connectivity_error" };
     }
-    return (await res.json()) as EnsureReadySuccess;
+    const json = await res.json() as Record<string, unknown>;
+    await logSteps(json, onLog);
+    return json as unknown as EnsureReadySuccess;
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {
       return { ready: false, error: "Connectivity check timed out", errorCode: "crewdeck_connectivity_timeout" };
