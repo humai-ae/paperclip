@@ -129,6 +129,8 @@ function makeAgent(adapterType: string) {
   };
 }
 
+const CLAUDE_MODEL = "anthropic/claude-opus-4-6";
+
 describe("agent skill routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -295,7 +297,7 @@ describe("agent skill routes", () => {
         role: "engineer",
         adapterType: "claude_local",
         desiredSkills: ["paperclip"],
-        adapterConfig: {},
+        adapterConfig: { model: CLAUDE_MODEL },
       });
 
     expect(res.status, JSON.stringify(res.body)).toBe(201);
@@ -320,6 +322,7 @@ describe("agent skill routes", () => {
         role: "engineer",
         adapterType: "claude_local",
         adapterConfig: {
+          model: CLAUDE_MODEL,
           promptTemplate: "You are QA.",
         },
       });
@@ -357,7 +360,7 @@ describe("agent skill routes", () => {
         name: "CEO",
         role: "ceo",
         adapterType: "claude_local",
-        adapterConfig: {},
+        adapterConfig: { model: CLAUDE_MODEL },
       });
 
     expect(res.status, JSON.stringify(res.body)).toBe(201);
@@ -384,7 +387,7 @@ describe("agent skill routes", () => {
         name: "Engineer",
         role: "engineer",
         adapterType: "claude_local",
-        adapterConfig: {},
+        adapterConfig: { model: CLAUDE_MODEL },
       });
 
     expect(res.status, JSON.stringify(res.body)).toBe(201);
@@ -411,7 +414,7 @@ describe("agent skill routes", () => {
         role: "engineer",
         adapterType: "claude_local",
         desiredSkills: ["paperclip"],
-        adapterConfig: {},
+        adapterConfig: { model: CLAUDE_MODEL },
       });
 
     expect(res.status, JSON.stringify(res.body)).toBe(201);
@@ -437,6 +440,7 @@ describe("agent skill routes", () => {
         role: "engineer",
         adapterType: "claude_local",
         adapterConfig: {
+          model: CLAUDE_MODEL,
           promptTemplate: "You are QA.",
         },
       });
@@ -458,5 +462,75 @@ describe("agent skill routes", () => {
       | { payload?: { adapterConfig?: Record<string, unknown> } }
       | undefined;
     expect(approvalInput?.payload?.adapterConfig?.promptTemplate).toBeUndefined();
+  });
+
+  it("rejects create-agent payloads missing required model", async () => {
+    const res = await request(createApp())
+      .post("/api/companies/company-1/agents")
+      .send({
+        name: "QA Agent",
+        role: "engineer",
+        adapterType: "claude_local",
+        adapterConfig: {},
+      });
+
+    expect(res.status, JSON.stringify(res.body)).toBe(422);
+    expect(String(res.body?.error ?? "")).toContain("adapterConfig.model is required");
+  });
+
+  it("rejects create-agent payloads with invalid model format", async () => {
+    const res = await request(createApp())
+      .post("/api/companies/company-1/agents")
+      .send({
+        name: "QA Agent",
+        role: "engineer",
+        adapterType: "claude_local",
+        adapterConfig: { model: "claude-opus-4-6" },
+      });
+
+    expect(res.status, JSON.stringify(res.body)).toBe(422);
+    expect(String(res.body?.error ?? "")).toContain("provider/model format");
+  });
+
+  it("rejects crewdeck payloads missing profileAdapterType", async () => {
+    const res = await request(createApp())
+      .post("/api/companies/company-1/agents")
+      .send({
+        name: "QA Agent",
+        role: "engineer",
+        adapterType: "crewdeck",
+        adapterConfig: { model: CLAUDE_MODEL },
+      });
+
+    expect(res.status, JSON.stringify(res.body)).toBe(422);
+    expect(String(res.body?.error ?? "")).toContain("profileAdapterType is required");
+  });
+
+  it("rejects crewdeck profileAdapterType='crewdeck'", async () => {
+    const res = await request(createApp())
+      .post("/api/companies/company-1/agents")
+      .send({
+        name: "QA Agent",
+        role: "engineer",
+        adapterType: "crewdeck",
+        adapterConfig: { model: CLAUDE_MODEL, profileAdapterType: "crewdeck" },
+      });
+
+    expect(res.status, JSON.stringify(res.body)).toBe(422);
+    expect(String(res.body?.error ?? "")).toContain("must be a local profile adapter type");
+  });
+
+  it("rejects unsupported crewdeck profileAdapterType values", async () => {
+    const res = await request(createApp())
+      .post("/api/companies/company-1/agents")
+      .send({
+        name: "QA Agent",
+        role: "engineer",
+        adapterType: "crewdeck",
+        adapterConfig: { model: CLAUDE_MODEL, profileAdapterType: "unknown_local" },
+      });
+
+    expect(res.status, JSON.stringify(res.body)).toBe(422);
+    expect(String(res.body?.error ?? "")).toContain("must be one of");
   });
 });
