@@ -128,13 +128,17 @@ async function readNdjsonResponse(
 
   while (true) {
     const { done, value } = await reader.read();
-    if (done) break;
+    if (done) {
+      buffer += decoder.decode(); // flush remaining bytes
+      break;
+    }
     buffer += decoder.decode(value, { stream: true });
 
     const lines = buffer.split("\n");
     buffer = lines.pop() ?? "";
 
-    for (const line of lines) {
+    for (const rawLine of lines) {
+      const line = rawLine.replace(/\r$/, "");
       if (!line.trim()) continue;
       try {
         const event = JSON.parse(line) as Record<string, unknown>;
@@ -158,9 +162,10 @@ async function readNdjsonResponse(
   }
 
   // Flush remaining buffer
-  if (buffer.trim()) {
+  const flushed = buffer.replace(/\r$/, "").trim();
+  if (flushed) {
     try {
-      const event = JSON.parse(buffer) as Record<string, unknown>;
+      const event = JSON.parse(flushed) as Record<string, unknown>;
       if (event.type === "result" && event.ready) {
         result = event as unknown as EnsureReadySuccess;
       } else if (event.type === "result") {
