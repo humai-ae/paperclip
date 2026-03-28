@@ -10,7 +10,7 @@ import {
 } from "@paperclipai/adapter-openclaw-gateway/server";
 
 const CREWDECK_SERVICE_URL = process.env.CREWDECK_SERVICE_URL ?? "http://localhost:3200";
-const ENSURE_READY_TIMEOUT_MS = 45_000;
+const ENSURE_READY_TIMEOUT_MS = 180_000;
 
 interface EnsureReadySuccess {
   ready: true;
@@ -63,7 +63,7 @@ const LOCAL_PROFILE_ADAPTER_TYPES = new Set([
   "pi_local",
   "cursor",
 ]);
-const DEFAULT_SANDBOX_PAPERCLIP_API_URL = "http://192.168.65.254:3100";
+const DEFAULT_SANDBOX_PAPERCLIP_API_URL = "http://paperclip.openshell.svc.cluster.local:3100";
 
 function asNonEmptyString(value: unknown): string | null {
   if (typeof value !== "string") return null;
