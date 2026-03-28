@@ -73,7 +73,7 @@ function asNonEmptyString(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function resolveSandboxPaperclipApiUrl(): string | null {
+function resolveSandboxPaperclipApiUrl(): string {
   const configured =
     asNonEmptyString(process.env.PAPERCLIP_SANDBOX_API_URL) ??
     asNonEmptyString(process.env.PAPERCLIP_API_URL);
@@ -311,14 +311,15 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     };
   }
 
+  const configuredPaperclipApiUrl = asNonEmptyString((ctx.config as Record<string, unknown>).paperclipApiUrl);
+  const paperclipApiUrl = configuredPaperclipApiUrl ?? resolveSandboxPaperclipApiUrl();
+
   const runOnce = async (ready: EnsureReadySuccess): Promise<{
     result: AdapterExecutionResult;
     transient: { matched: boolean; message: string };
     auth: { matched: boolean; message: string };
     approval: { matched: boolean; message: string };
   }> => {
-    const configuredPaperclipApiUrl = asNonEmptyString((ctx.config as Record<string, unknown>).paperclipApiUrl);
-    const paperclipApiUrl = configuredPaperclipApiUrl ?? resolveSandboxPaperclipApiUrl();
     const existingTemplate = (ctx.config as Record<string, unknown>).payloadTemplate as Record<string, unknown> | undefined;
     const existingMessage = typeof existingTemplate?.message === "string" ? existingTemplate.message : "";
     const completionSignal = [
@@ -584,6 +585,8 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
           "stderr",
           "[crewdeck] no completion signal — sub-agents may still be working; polling issue status...\n",
         );
+        // Poll from the host side (not sandbox), so use the host-reachable Paperclip URL.
+        // paperclipApiUrl is sandbox-reachable (k8s DNS) and won't resolve from here.
         const paperclipUrl = asNonEmptyString(process.env.PAPERCLIP_API_URL) ?? "http://localhost:3100";
         const POLL_INTERVAL_MS = 10_000;
         const POLL_TIMEOUT_MS = 5 * 60 * 1000;
