@@ -110,9 +110,16 @@ async function readNdjsonResponse(
 ): Promise<EnsureReadyResult> {
   const reader = res.body?.getReader();
   if (!reader) {
+    // No streaming body — fall back to reading the full response as JSON.
     const text = await res.text();
-    try { return JSON.parse(text) as EnsureReadyResult; } catch {}
-    return { ready: false, error: "Empty response", errorCode: "crewdeck_service_error" };
+    try {
+      const json = JSON.parse(text) as Record<string, unknown>;
+      if (json.ready === false && typeof json.error === "string") {
+        return json as unknown as EnsureReadyError;
+      }
+      return json as unknown as EnsureReadySuccess;
+    } catch {}
+    return { ready: false, error: text || "Empty response", errorCode: "crewdeck_service_error" };
   }
 
   const decoder = new TextDecoder();
