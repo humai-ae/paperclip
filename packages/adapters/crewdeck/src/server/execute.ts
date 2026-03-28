@@ -555,9 +555,11 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     !result.errorMessage
   ) {
     const summary = typeof result.summary === "string" ? result.summary : "";
-    const resultJson = result.resultJson ? JSON.stringify(result.resultJson) : "";
-    const haystack = `${summary}\n${resultJson}`;
-    const hasCompletionSignal = /CREWDECK_RUN_COMPLETE/.test(haystack);
+    const SIGNAL_RE = /^CREWDECK_RUN_COMPLETE\s*$/m;
+    let hasCompletionSignal = SIGNAL_RE.test(summary);
+    if (!hasCompletionSignal && result.resultJson) {
+      hasCompletionSignal = SIGNAL_RE.test(JSON.stringify(result.resultJson));
+    }
 
     if (!hasCompletionSignal) {
       const issueId = asNonEmptyString(ctx.context.issueId) ?? asNonEmptyString(ctx.context.taskId);
