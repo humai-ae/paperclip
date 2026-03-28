@@ -151,7 +151,9 @@ async function readNdjsonResponse(
             } as EnsureReadyError;
           }
         }
-      } catch {}
+      } catch {
+        if (onLog) await onLog("stderr", `[crewdeck] malformed NDJSON line: ${line.slice(0, 120)}\n`);
+      }
     }
   }
 
@@ -164,7 +166,9 @@ async function readNdjsonResponse(
       } else if (event.type === "result") {
         return { ready: false, error: typeof event.error === "string" ? event.error : "Service error", errorCode: "crewdeck_service_error" } as EnsureReadyError;
       }
-    } catch {}
+    } catch {
+      if (onLog) await onLog("stderr", `[crewdeck] malformed NDJSON line: ${buffer.slice(0, 120)}\n`);
+    }
   }
 
   return result ?? { ready: false, error: "No result from service", errorCode: "crewdeck_service_error" };
