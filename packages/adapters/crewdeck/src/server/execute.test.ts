@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { AdapterExecutionResult } from "@paperclipai/adapter-utils";
 import {
   looksLikeTransientProviderFailure,
@@ -6,6 +6,7 @@ import {
   looksLikeApprovalRequired,
   isGatewayConnectivityFailure,
   COMPLETION_SIGNAL_RE,
+  readNdjsonResponse,
 } from "./execute.js";
 
 function makeResult(overrides: Partial<AdapterExecutionResult> = {}): AdapterExecutionResult {
@@ -166,5 +167,88 @@ describe("COMPLETION_SIGNAL_RE", () => {
 
   it("does not match when prefixed with text on same line", () => {
     expect(COMPLETION_SIGNAL_RE.test("output: CREWDECK_RUN_COMPLETE")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// NDJSON stream reader
+// ---------------------------------------------------------------------------
+
+function makeNdjsonResponse(lines: string[]): Response {
+  const body = lines.join("\n") + "\n";
+  return new Response(body, {
+    headers: { "content-type": "application/x-ndjson" },
+  });
+}
+
+describe("readNdjsonResponse", () => {
+  it("parses a successful result with steps", async () => {
+    const res = makeNdjsonResponse([
+      JSON.stringify({ type: "step", step: "sandbox", status: "checking" }),
+      JSON.stringify({ type: "step", step: "sandbox", status: "ok" }),
+      JSON.stringify({ type: "result", ready: true, gatewayPort: 18790, gatewayToken: "abc123" }),
+    ]);
+    const logs: string[] = [];
+    const result = await readNdjsonResponse(res, async (_stream, msg) => { logs.push(msg); });
+    expect(result).toMatchObject({ ready: true, gatewayPort: 18790, gatewayToken: "abc123" });
+    expect(logs).toHaveLength(2);
+    expect(logs[0]).toContain("sandbox: checking");
+    expect(logs[1]).toContain("sandbox: ok");
+  });
+
+  it("returns error result from stream", async () => {
+    const res = makeNdjsonResponse([
+      JSON.stringify({ type: "step", step: "sandbox", status: "provisioning" }),
+      JSON.stringify({ type: "result", ready: false, error: "Provisioning failed" }),
+    ]);
+    const result = await readNdjsonResponse(res);
+    expect(result).toMatchObject({ ready: false, error: "Provisioning failed" });
+  });
+
+  it("handles CRLF line endings", async () => {
+    const body = [
+      JSON.stringify({ type: "step", step: "config", status: "ok" }),
+      JSON.stringify({ type: "result", ready: true, gatewayPort: 18790, gatewayToken: "t" }),
+    ].join("\r\n") + "\r\n";
+    const res = new Response(body, { headers: { "content-type": "application/x-ndjson" } });
+    const result = await readNdjsonResponse(res);
+    expect(result).toMatchObject({ ready: true, gatewayPort: 18790 });
+  });
+
+  it("logs warning for malformed lines", async () => {
+    const res = makeNdjsonResponse([
+      "not valid json",
+      JSON.stringify({ type: "result", ready: true, gatewayPort: 18790, gatewayToken: "t" }),
+    ]);
+    const logs: string[] = [];
+    const result = await readNdjsonResponse(res, async (_stream, msg) => { logs.push(msg); });
+    expect(result).toMatchObject({ ready: true });
+    expect(logs.some((l) => l.includes("malformed"))).toBe(true);
+  });
+
+  it("returns error when no result line is received", async () => {
+    const res = makeNdjsonResponse([
+      JSON.stringify({ type: "step", step: "sandbox", status: "ok" }),
+    ]);
+    const result = await readNdjsonResponse(res);
+    expect(result).toMatchObject({ ready: false });
+  });
+
+  it("falls back to JSON parsing when body has no reader", async () => {
+    // Simulate a Response with no streaming body (e.g. from a non-streaming server)
+    const json = JSON.stringify({ ready: true, gatewayPort: 18790, gatewayToken: "abc" });
+    const res = new Response(json, { headers: { "content-type": "application/json" } });
+    // Override body to null to simulate missing reader
+    Object.defineProperty(res, "body", { value: null });
+    const result = await readNdjsonResponse(res);
+    expect(result).toMatchObject({ ready: true, gatewayPort: 18790 });
+  });
+
+  it("falls back to error JSON when body is null and response is error", async () => {
+    const json = JSON.stringify({ ready: false, error: "sandbox not found" });
+    const res = new Response(json);
+    Object.defineProperty(res, "body", { value: null });
+    const result = await readNdjsonResponse(res);
+    expect(result).toMatchObject({ ready: false, error: "sandbox not found" });
   });
 });

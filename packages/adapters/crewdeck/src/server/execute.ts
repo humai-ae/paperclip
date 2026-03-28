@@ -104,7 +104,7 @@ function resolveSandboxPaperclipApiUrl(): string {
  * Read an NDJSON stream from the service. Logs each step line in real-time
  * and returns the final result object.
  */
-async function readNdjsonResponse(
+export async function readNdjsonResponse(
   res: Response,
   onLog?: (stream: "stdout" | "stderr", msg: string) => Promise<void>,
 ): Promise<EnsureReadyResult> {
