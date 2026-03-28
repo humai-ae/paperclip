@@ -548,7 +548,8 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
 
   // Guard: if the adapter returned success but the agent didn't actually complete
   // the workflow (e.g. it spawned sub-agents and the main session exited early),
-  // check for the completion signal and downgrade to failed if missing.
+  // check for the completion signal. If missing, poll the issue status to wait
+  // for sub-agents to finish before giving up.
   if (
     (result.exitCode ?? 0) === 0 &&
     !result.errorMessage
@@ -559,10 +560,53 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     const hasCompletionSignal = /CREWDECK_RUN_COMPLETE/.test(haystack);
 
     if (!hasCompletionSignal) {
-      await ctx.onLog(
-        "stderr",
-        "[crewdeck] agent session ended without completion signal (CREWDECK_RUN_COMPLETE); marking run as incomplete so the task stays open\n",
-      );
+      const issueId = asNonEmptyString(ctx.context.issueId) ?? asNonEmptyString(ctx.context.taskId);
+      if (issueId && runApiKey) {
+        await ctx.onLog(
+          "stderr",
+          "[crewdeck] no completion signal — sub-agents may still be working; polling issue status...\n",
+        );
+        const paperclipUrl = asNonEmptyString(process.env.PAPERCLIP_API_URL) ?? "http://localhost:3100";
+        const POLL_INTERVAL_MS = 10_000;
+        const POLL_TIMEOUT_MS = 5 * 60 * 1000;
+        const pollStart = Date.now();
+        let issueCompleted = false;
+
+        while (Date.now() - pollStart < POLL_TIMEOUT_MS) {
+          await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+          try {
+            const res = await fetch(`${paperclipUrl}/api/issues/${issueId}`, {
+              headers: { authorization: `Bearer ${runApiKey}` },
+              signal: AbortSignal.timeout(8_000),
+            });
+            if (res.ok) {
+              const issue = (await res.json()) as Record<string, unknown>;
+              const status = typeof issue.status === "string" ? issue.status.toLowerCase() : "";
+              await ctx.onLog(
+                "stderr",
+                `[crewdeck] polling issue ${issueId}: status=${status} (${Math.round((Date.now() - pollStart) / 1000)}s elapsed)\n`,
+              );
+              if (status === "done" || status === "cancelled") {
+                issueCompleted = true;
+                break;
+              }
+            }
+          } catch {
+            // Polling failure is non-fatal; keep trying
+          }
+        }
+
+        if (issueCompleted) {
+          await ctx.onLog("stderr", "[crewdeck] issue completed by sub-agent; marking run as succeeded\n");
+          return result;
+        }
+
+        await ctx.onLog(
+          "stderr",
+          "[crewdeck] issue still open after polling; marking run as incomplete\n",
+        );
+      }
+
       return {
         ...result,
         exitCode: 1,
