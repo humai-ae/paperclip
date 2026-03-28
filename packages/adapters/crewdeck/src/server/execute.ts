@@ -582,7 +582,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   if (auth.matched) {
     await ctx.onLog(
       "stderr",
-      "[crewdeck] provider auth failure detected; re-running ensure-ready and retrying once\n",
+      "[crewdeck] provider auth failure detected; checking connectivity and retrying once\n",
     );
     await ctx.onLog("stdout", "[crewdeck] retry: checking connectivity...\n");
     const refreshed = await ensureConnectivity(agentId, runApiKey, ctx.onLog);
@@ -640,7 +640,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   if (isGatewayConnectivityFailure(result)) {
     await ctx.onLog(
       "stderr",
-      "[crewdeck] gateway connectivity failure detected; re-running ensure-ready and retrying once\n",
+      "[crewdeck] gateway connectivity failure detected; checking connectivity and retrying once\n",
     );
     await ctx.onLog("stdout", "[crewdeck] retry: checking connectivity...\n");
     const refreshed = await ensureConnectivity(agentId, runApiKey, ctx.onLog);
