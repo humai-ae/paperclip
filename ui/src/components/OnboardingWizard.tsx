@@ -329,6 +329,7 @@ export function OnboardingWizard() {
     }
     return {
       ...config,
+      model,
       profileAdapterType: adapterType,
     };
   }
@@ -347,7 +348,7 @@ export function OnboardingWizard() {
     try {
       const result = await agentsApi.testEnvironment(
         createdCompanyId,
-        adapterType,
+        "crewdeck",
         {
           adapterConfig: adapterConfigOverride ?? buildAdapterConfig()
         }

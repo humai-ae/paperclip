@@ -43,7 +43,7 @@ import { ChoosePathButton } from "./PathInstructionsModal";
 import { OpenCodeLogoIcon } from "./OpenCodeLogoIcon";
 import { ReportsToPicker } from "./ReportsToPicker";
 import { shouldShowLegacyWorkingDirectoryField } from "../lib/legacy-agent-config";
-import { LOCAL_PROFILE_DEFAULT_MODEL_BY_TYPE } from "../lib/agent-profile-defaults";
+import { isLocalProfileAdapterType, LOCAL_PROFILE_DEFAULT_MODEL_BY_TYPE } from "../lib/agent-profile-defaults";
 
 /* ---- Create mode values ---- */
 
@@ -359,10 +359,27 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
 
   function buildAdapterConfigForTest(): Record<string, unknown> {
     if (isCreate) {
-      return uiAdapter.buildAdapterConfig(val!);
+      const built = uiAdapter.buildAdapterConfig(val!);
+      if (isLocalProfileAdapterType(adapterType)) {
+        return {
+          ...built,
+          model: val!.model,
+          profileAdapterType: adapterType,
+        };
+      }
+      return built;
     }
     const base = config as Record<string, unknown>;
-    return { ...base, ...overlay.adapterConfig };
+    const merged = { ...base, ...overlay.adapterConfig };
+    if (isLocalProfileAdapterType(adapterType)) {
+      const model = typeof merged.model === "string" ? merged.model : "";
+      return {
+        ...merged,
+        model,
+        profileAdapterType: adapterType,
+      };
+    }
+    return merged;
   }
 
   const testEnvironment = useMutation({
@@ -370,7 +387,8 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
       if (!selectedCompanyId) {
         throw new Error("Select a company to test adapter environment");
       }
-      return agentsApi.testEnvironment(selectedCompanyId, adapterType, {
+      const environmentAdapterType = isLocalProfileAdapterType(adapterType) ? "crewdeck" : adapterType;
+      return agentsApi.testEnvironment(selectedCompanyId, environmentAdapterType, {
         adapterConfig: buildAdapterConfigForTest(),
       });
     },
