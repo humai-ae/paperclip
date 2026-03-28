@@ -71,5 +71,9 @@ export function parseOpenClawGatewayStdoutLine(line: string, ts: string): Transc
     return [{ kind: "system", ts, text: trimmed.replace(/^\[openclaw-gateway\]\s*/, "") }];
   }
 
+  if (trimmed.startsWith("[crewdeck]")) {
+    return [{ kind: "system", ts, text: trimmed }];
+  }
+
   return [{ kind: "stdout", ts, text: normalized.line }];
 }
