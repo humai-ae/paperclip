@@ -10,6 +10,7 @@ import {
 } from "@paperclipai/adapter-openclaw-gateway/server";
 
 const CREWDECK_SERVICE_URL = process.env.CREWDECK_SERVICE_URL ?? "http://localhost:3200";
+const ENSURE_READY_TIMEOUT_MS = 45_000;
 
 interface EnsureReadySuccess {
   ready: true;
@@ -35,6 +36,20 @@ const TRANSIENT_PROVIDER_PATTERNS: RegExp[] = [
   /\bHTTP\s*429\b/i,
   /\btry\s+again\s+(?:later|soon)\b/i,
 ];
+const PROVIDER_AUTH_PATTERNS: RegExp[] = [
+  /\bHTTP\s*401\b/i,
+  /\bauthentication_error\b/i,
+  /\binvalid bearer token\b/i,
+  /\bunauthorized\b/i,
+  /\binvalid api key\b/i,
+  /\bfailoverReason["']?\s*:\s*["']auth\b/i,
+];
+const APPROVAL_REQUIRED_PATTERNS: RegExp[] = [
+  /\/approve\s+[a-z0-9_-]+\s+allow-always/i,
+  /\bi need approval\b/i,
+  /\bplease run:\s*`?\/approve\b/i,
+  /\bapproval required\b/i,
+];
 
 const GATEWAY_CONNECTIVITY_ERROR_CODES = new Set<string>([
   "openclaw_gateway_request_failed",
@@ -48,6 +63,7 @@ const LOCAL_PROFILE_ADAPTER_TYPES = new Set([
   "pi_local",
   "cursor",
 ]);
+const DEFAULT_SANDBOX_PAPERCLIP_API_URL = "http://192.168.65.254:3100";
 
 function asNonEmptyString(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -55,19 +71,46 @@ function asNonEmptyString(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function resolveSandboxPaperclipApiUrl(): string | null {
+  const configured =
+    asNonEmptyString(process.env.PAPERCLIP_SANDBOX_API_URL) ??
+    asNonEmptyString(process.env.PAPERCLIP_API_URL);
+  if (!configured) return DEFAULT_SANDBOX_PAPERCLIP_API_URL;
+
+  try {
+    const parsed = new URL(configured);
+    const normalizedHost = parsed.hostname.trim().toLowerCase();
+    if (
+      normalizedHost === "paperclip" ||
+      normalizedHost === "localhost" ||
+      normalizedHost === "127.0.0.1" ||
+      normalizedHost === "::1"
+    ) {
+      return DEFAULT_SANDBOX_PAPERCLIP_API_URL;
+    }
+    return parsed.toString();
+  } catch {
+    return DEFAULT_SANDBOX_PAPERCLIP_API_URL;
+  }
+}
+
 async function ensureReady(
   agentId: string,
   runApiKey: string,
-  options: { profileAdapterType: string; model: string },
+  options: { profileAdapterType: string; model: string; forceRuntimeProbe?: boolean },
 ): Promise<EnsureReadyResult> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), ENSURE_READY_TIMEOUT_MS);
   try {
     const res = await fetch(`${CREWDECK_SERVICE_URL}/api/sandbox/${agentId}/ensure-ready`, {
       method: "POST",
       headers: { "content-type": "application/json" },
+      signal: controller.signal,
       body: JSON.stringify({
         runApiKey,
         profileAdapterType: options.profileAdapterType,
         model: options.model,
+        forceRuntimeProbe: options.forceRuntimeProbe ?? false,
       }),
     });
     if (res.status === 404) {
@@ -79,7 +122,16 @@ async function ensureReady(
     }
     return (await res.json()) as EnsureReadySuccess;
   } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      return {
+        ready: false,
+        error: `CrewDeck Service timed out after ${Math.round(ENSURE_READY_TIMEOUT_MS / 1000)}s during ensure-ready`,
+        errorCode: "crewdeck_service_timeout",
+      };
+    }
     return { ready: false, error: `CrewDeck Service unreachable: ${err instanceof Error ? err.message : String(err)}`, errorCode: "crewdeck_service_unreachable" };
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -127,6 +179,68 @@ function hasMeaningfulModelOutput(result: AdapterExecutionResult): boolean {
   if (summary.length > 0) return true;
   const outputTokens = result.usage?.outputTokens ?? 0;
   return outputTokens > 0;
+}
+
+function looksLikeProviderAuthFailure(result: AdapterExecutionResult): { matched: boolean; message: string } {
+  const fragments = [
+    typeof result.errorMessage === "string" ? result.errorMessage : "",
+    typeof result.summary === "string" ? result.summary : "",
+  ];
+
+  if (result.resultJson) {
+    fragments.push(JSON.stringify(result.resultJson));
+  }
+
+  const haystack = fragments.filter(Boolean).join("\n");
+  const match = PROVIDER_AUTH_PATTERNS.find((pattern) => pattern.test(haystack));
+  return {
+    matched: Boolean(match),
+    message: match
+      ? `Upstream provider auth failed (${match.source}).`
+      : "",
+  };
+}
+
+function firstMatchingAuthLine(text: string): string | null {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  for (const line of lines) {
+    if (PROVIDER_AUTH_PATTERNS.some((pattern) => pattern.test(line))) return line;
+  }
+  return null;
+}
+
+function looksLikeApprovalRequired(result: AdapterExecutionResult): { matched: boolean; message: string } {
+  const fragments = [
+    typeof result.errorMessage === "string" ? result.errorMessage : "",
+    typeof result.summary === "string" ? result.summary : "",
+  ];
+
+  if (result.resultJson) {
+    fragments.push(JSON.stringify(result.resultJson));
+  }
+
+  const haystack = fragments.filter(Boolean).join("\n");
+  const match = APPROVAL_REQUIRED_PATTERNS.find((pattern) => pattern.test(haystack));
+  return {
+    matched: Boolean(match),
+    message: match
+      ? `OpenClaw requested interactive approval (${match.source}).`
+      : "",
+  };
+}
+
+function firstMatchingApprovalLine(text: string): string | null {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  for (const line of lines) {
+    if (APPROVAL_REQUIRED_PATTERNS.some((pattern) => pattern.test(line))) return line;
+  }
+  return null;
 }
 
 function isGatewayConnectivityFailure(result: AdapterExecutionResult): boolean {
@@ -198,18 +312,31 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   const runOnce = async (ready: EnsureReadySuccess): Promise<{
     result: AdapterExecutionResult;
     transient: { matched: boolean; message: string };
+    auth: { matched: boolean; message: string };
+    approval: { matched: boolean; message: string };
   }> => {
+    const configuredPaperclipApiUrl = asNonEmptyString((ctx.config as Record<string, unknown>).paperclipApiUrl);
+    const paperclipApiUrl = configuredPaperclipApiUrl ?? resolveSandboxPaperclipApiUrl();
     const runConfig = {
       ...ctx.config,
       url: `ws://localhost:${ready.gatewayPort}`,
       ...(ready.gatewayToken ? { authToken: ready.gatewayToken } : {}),
+      ...(paperclipApiUrl ? { paperclipApiUrl } : {}),
     };
     let transientFromLogs: string | null = null;
+    let authFromLogs: string | null = null;
+    let approvalFromLogs: string | null = null;
     const result = await openclawExecute({
       ...ctx,
       onLog: async (stream, chunk) => {
         if (transientFromLogs === null && (stream === "stderr" || stream === "stdout")) {
           transientFromLogs = firstMatchingTransientLine(chunk);
+        }
+        if (authFromLogs === null && (stream === "stderr" || stream === "stdout")) {
+          authFromLogs = firstMatchingAuthLine(chunk);
+        }
+        if (approvalFromLogs === null && (stream === "stderr" || stream === "stdout")) {
+          approvalFromLogs = firstMatchingApprovalLine(chunk);
         }
         await ctx.onLog(stream, chunk);
       },
@@ -218,7 +345,12 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
 
     const transientFromResult = looksLikeTransientProviderFailure(result);
     if (transientFromResult.matched) {
-      return { result, transient: transientFromResult };
+      return {
+        result,
+        transient: transientFromResult,
+        auth: { matched: false, message: "" },
+        approval: { matched: false, message: "" },
+      };
     }
 
     if (transientFromLogs && !hasMeaningfulModelOutput(result)) {
@@ -228,15 +360,68 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
           matched: true,
           message: `Upstream model/provider unavailable (${transientFromLogs}).`,
         },
+        auth: { matched: false, message: "" },
+        approval: { matched: false, message: "" },
       };
     }
 
-    return { result, transient: { matched: false, message: "" } };
+    const authFromResult = looksLikeProviderAuthFailure(result);
+    if (authFromResult.matched) {
+      return {
+        result,
+        transient: { matched: false, message: "" },
+        auth: authFromResult,
+        approval: { matched: false, message: "" },
+      };
+    }
+
+    if (authFromLogs && !hasMeaningfulModelOutput(result)) {
+      return {
+        result,
+        transient: { matched: false, message: "" },
+        auth: {
+          matched: true,
+          message: `Upstream provider auth failed (${authFromLogs}).`,
+        },
+        approval: { matched: false, message: "" },
+      };
+    }
+
+    const approvalFromResult = looksLikeApprovalRequired(result);
+    if (approvalFromResult.matched) {
+      return {
+        result,
+        transient: { matched: false, message: "" },
+        auth: { matched: false, message: "" },
+        approval: approvalFromResult,
+      };
+    }
+
+    if (approvalFromLogs && !hasMeaningfulModelOutput(result)) {
+      return {
+        result,
+        transient: { matched: false, message: "" },
+        auth: { matched: false, message: "" },
+        approval: {
+          matched: true,
+          message: `OpenClaw requested interactive approval (${approvalFromLogs}).`,
+        },
+      };
+    }
+
+    return {
+      result,
+      transient: { matched: false, message: "" },
+      auth: { matched: false, message: "" },
+      approval: { matched: false, message: "" },
+    };
   };
 
   const attempt = await runOnce(status);
   const result = attempt.result;
   const transient = attempt.transient;
+  const auth = attempt.auth;
+  const approval = attempt.approval;
 
   if (transient.matched) {
     await ctx.onLog(
@@ -251,6 +436,61 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       timedOut: false,
       errorCode: "crewdeck_provider_unavailable",
       errorMessage: result.errorMessage ?? transient.message,
+    };
+  }
+
+  if (auth.matched) {
+    await ctx.onLog(
+      "stderr",
+      "[crewdeck] provider auth failure detected; re-running ensure-ready and retrying once\n",
+    );
+    const refreshed = await ensureReady(agentId, runApiKey, {
+      profileAdapterType,
+      model,
+      forceRuntimeProbe: true,
+    });
+    if (refreshed.ready) {
+      const retry = await runOnce(refreshed);
+      if (retry.transient.matched) {
+        await ctx.onLog(
+          "stderr",
+          "[crewdeck] transient provider availability detected after auth refresh; failing run for retry\n",
+        );
+        await syncBack(agentId);
+        return {
+          ...retry.result,
+          exitCode: 1,
+          signal: null,
+          timedOut: false,
+          errorCode: "crewdeck_provider_unavailable",
+          errorMessage: retry.result.errorMessage ?? retry.transient.message,
+        };
+      }
+      if (retry.auth.matched) {
+        await syncBack(agentId);
+        return {
+          ...retry.result,
+          exitCode: 1,
+          signal: null,
+          timedOut: false,
+          errorCode: "crewdeck_provider_auth_failed",
+          errorMessage: retry.result.errorMessage ?? retry.auth.message,
+        };
+      }
+      await syncBack(agentId);
+      return retry.result;
+    }
+  }
+
+  if (approval.matched) {
+    await syncBack(agentId);
+    return {
+      ...result,
+      exitCode: 1,
+      signal: null,
+      timedOut: false,
+      errorCode: "crewdeck_interactive_approval_required",
+      errorMessage: result.errorMessage ?? approval.message,
     };
   }
 
@@ -277,12 +517,60 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
           errorMessage: retry.result.errorMessage ?? retry.transient.message,
         };
       }
+      if (retry.auth.matched) {
+        await syncBack(agentId);
+        return {
+          ...retry.result,
+          exitCode: 1,
+          signal: null,
+          timedOut: false,
+          errorCode: "crewdeck_provider_auth_failed",
+          errorMessage: retry.result.errorMessage ?? retry.auth.message,
+        };
+      }
+      if (retry.approval.matched) {
+        await syncBack(agentId);
+        return {
+          ...retry.result,
+          exitCode: 1,
+          signal: null,
+          timedOut: false,
+          errorCode: "crewdeck_interactive_approval_required",
+          errorMessage: retry.result.errorMessage ?? retry.approval.message,
+        };
+      }
       await syncBack(agentId);
       return retry.result;
     }
   }
 
   await syncBack(agentId);
+
+  // Guard: if the adapter returned success but the agent didn't actually complete
+  // the workflow (e.g. it spawned sub-agents and the main session exited early),
+  // check for the completion signal and downgrade to failed if missing.
+  if (
+    (result.exitCode ?? 0) === 0 &&
+    !result.errorMessage
+  ) {
+    const summary = typeof result.summary === "string" ? result.summary : "";
+    const resultJson = result.resultJson ? JSON.stringify(result.resultJson) : "";
+    const haystack = `${summary}\n${resultJson}`;
+    const hasCompletionSignal = /CREWDECK_RUN_COMPLETE/.test(haystack);
+
+    if (!hasCompletionSignal) {
+      await ctx.onLog(
+        "stderr",
+        "[crewdeck] agent session ended without completion signal (CREWDECK_RUN_COMPLETE); marking run as incomplete so the task stays open\n",
+      );
+      return {
+        ...result,
+        exitCode: 1,
+        errorCode: "crewdeck_incomplete_run",
+        errorMessage: "Agent session ended without signaling task completion. Work may still be in progress via sub-agents.",
+      };
+    }
+  }
 
   return result;
 }
