@@ -51,6 +51,8 @@ const APPROVAL_REQUIRED_PATTERNS: RegExp[] = [
   /\bapproval required\b/i,
 ];
 
+export const COMPLETION_SIGNAL_RE = /^CREWDECK_RUN_COMPLETE\s*$/m;
+
 const GATEWAY_CONNECTIVITY_ERROR_CODES = new Set<string>([
   "openclaw_gateway_request_failed",
   "openclaw_gateway_timeout",
@@ -143,7 +145,7 @@ async function syncBack(agentId: string): Promise<void> {
   }
 }
 
-function looksLikeTransientProviderFailure(result: AdapterExecutionResult): { matched: boolean; message: string } {
+export function looksLikeTransientProviderFailure(result: AdapterExecutionResult): { matched: boolean; message: string } {
   const fragments = [
     typeof result.errorMessage === "string" ? result.errorMessage : "",
     typeof result.summary === "string" ? result.summary : "",
@@ -181,7 +183,7 @@ function hasMeaningfulModelOutput(result: AdapterExecutionResult): boolean {
   return outputTokens > 0;
 }
 
-function looksLikeProviderAuthFailure(result: AdapterExecutionResult): { matched: boolean; message: string } {
+export function looksLikeProviderAuthFailure(result: AdapterExecutionResult): { matched: boolean; message: string } {
   const fragments = [
     typeof result.errorMessage === "string" ? result.errorMessage : "",
     typeof result.summary === "string" ? result.summary : "",
@@ -212,7 +214,7 @@ function firstMatchingAuthLine(text: string): string | null {
   return null;
 }
 
-function looksLikeApprovalRequired(result: AdapterExecutionResult): { matched: boolean; message: string } {
+export function looksLikeApprovalRequired(result: AdapterExecutionResult): { matched: boolean; message: string } {
   const fragments = [
     typeof result.errorMessage === "string" ? result.errorMessage : "",
     typeof result.summary === "string" ? result.summary : "",
@@ -243,7 +245,7 @@ function firstMatchingApprovalLine(text: string): string | null {
   return null;
 }
 
-function isGatewayConnectivityFailure(result: AdapterExecutionResult): boolean {
+export function isGatewayConnectivityFailure(result: AdapterExecutionResult): boolean {
   const code = typeof result.errorCode === "string" ? result.errorCode : "";
   if (!GATEWAY_CONNECTIVITY_ERROR_CODES.has(code)) return false;
   if (hasMeaningfulModelOutput(result)) return false;
@@ -555,10 +557,9 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     !result.errorMessage
   ) {
     const summary = typeof result.summary === "string" ? result.summary : "";
-    const SIGNAL_RE = /^CREWDECK_RUN_COMPLETE\s*$/m;
-    let hasCompletionSignal = SIGNAL_RE.test(summary);
+    let hasCompletionSignal = COMPLETION_SIGNAL_RE.test(summary);
     if (!hasCompletionSignal && result.resultJson) {
-      hasCompletionSignal = SIGNAL_RE.test(JSON.stringify(result.resultJson));
+      hasCompletionSignal = COMPLETION_SIGNAL_RE.test(JSON.stringify(result.resultJson));
     }
 
     if (!hasCompletionSignal) {
