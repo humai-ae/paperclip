@@ -86,6 +86,8 @@ export function agentRoutes(db: Db) {
     "cursor",
     "crewdeck",
   ]);
+  const SUPPORTED_CREWDECK_PROFILE_ADAPTER_TYPES = Object.keys(DEFAULT_INSTRUCTIONS_PATH_KEYS).sort();
+  const SUPPORTED_CREWDECK_PROFILE_ADAPTER_TYPE_SET = new Set(SUPPORTED_CREWDECK_PROFILE_ADAPTER_TYPES);
 
   const router = Router();
   const svc = agentService(db);
@@ -421,6 +423,16 @@ export function agentRoutes(db: Db) {
       const profileAdapterType = asNonEmptyString(adapterConfig.profileAdapterType);
       if (!profileAdapterType) {
         throw unprocessable("adapterConfig.profileAdapterType is required for adapter type 'crewdeck'");
+      }
+      if (profileAdapterType === "crewdeck") {
+        throw unprocessable(
+          "adapterConfig.profileAdapterType must be a local profile adapter type, not 'crewdeck'",
+        );
+      }
+      if (!SUPPORTED_CREWDECK_PROFILE_ADAPTER_TYPE_SET.has(profileAdapterType)) {
+        throw unprocessable(
+          `adapterConfig.profileAdapterType must be one of ${SUPPORTED_CREWDECK_PROFILE_ADAPTER_TYPES.join(", ")}, received '${profileAdapterType}'`,
+        );
       }
     }
   }
