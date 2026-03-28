@@ -268,6 +268,19 @@ export function OnboardingWizard() {
         entries: [...entries].sort((a, b) => a.id.localeCompare(b.id))
       }));
   }, [filteredModels, adapterType]);
+  const selectedModelId = model.trim();
+  const hasValidSelectedModel = Boolean(
+    selectedModelId && selectedModelId.includes("/")
+  );
+  const isOpenCodeModelLoading =
+    adapterType === "opencode_local" &&
+    (adapterModelsLoading || adapterModelsFetching);
+  const isOpenCodeModelUnavailable =
+    adapterType === "opencode_local" &&
+    !isOpenCodeModelLoading &&
+    !adapterModelsError &&
+    (adapterModels ?? []).length > 0 &&
+    !(adapterModels ?? []).some((entry) => entry.id === selectedModelId);
 
   function reset() {
     setStep(1);
@@ -335,7 +348,8 @@ export function OnboardingWizard() {
   }
 
   async function runAdapterEnvironmentTest(
-    adapterConfigOverride?: Record<string, unknown>
+    adapterConfigOverride?: Record<string, unknown>,
+    options?: { silentSuccess?: boolean }
   ): Promise<AdapterEnvironmentTestResult | null> {
     if (!createdCompanyId) {
       setAdapterEnvError(
@@ -353,7 +367,9 @@ export function OnboardingWizard() {
           adapterConfig: adapterConfigOverride ?? buildAdapterConfig()
         }
       );
-      setAdapterEnvResult(result);
+      if (!(options?.silentSuccess && result.status === "pass")) {
+        setAdapterEnvResult(result);
+      }
       return result;
     } catch (err) {
       setAdapterEnvError(
@@ -403,41 +419,39 @@ export function OnboardingWizard() {
 
   async function handleStep2Next() {
     if (!createdCompanyId) return;
+    if (!hasValidSelectedModel) {
+      setError("Model is required and must be in provider/model format.");
+      return;
+    }
+
+    if (adapterType === "opencode_local") {
+      if (adapterModelsError) {
+        setError(
+          adapterModelsError instanceof Error
+            ? adapterModelsError.message
+            : "Failed to load OpenCode models."
+        );
+        return;
+      }
+      if (isOpenCodeModelLoading) {
+        setError(
+          "OpenCode models are still loading. Please wait and try again."
+        );
+        return;
+      }
+      if (isOpenCodeModelUnavailable) {
+        setError(`Configured model is unavailable: ${selectedModelId}`);
+        return;
+      }
+    }
+
     setLoading(true);
     setError(null);
     try {
-      const selectedModelId = model.trim();
-      if (!selectedModelId || !selectedModelId.includes("/")) {
-        setError("Model is required and must be in provider/model format.");
-        return;
-      }
-
-      if (adapterType === "opencode_local") {
-        if (adapterModelsError) {
-          setError(
-            adapterModelsError instanceof Error
-              ? adapterModelsError.message
-              : "Failed to load OpenCode models."
-          );
-          return;
-        }
-        if (adapterModelsLoading || adapterModelsFetching) {
-          setError(
-            "OpenCode models are still loading. Please wait and try again."
-          );
-          return;
-        }
-        const discoveredModels = adapterModels ?? [];
-        if (discoveredModels.length > 0 && !discoveredModels.some((entry) => entry.id === selectedModelId)) {
-          setError(
-            `Configured model is unavailable: ${selectedModelId}`
-          );
-          return;
-        }
-      }
-
       if (isLocalAdapter) {
-        const result = adapterEnvResult ?? (await runAdapterEnvironmentTest());
+        const result =
+          adapterEnvResult ??
+          (await runAdapterEnvironmentTest(undefined, { silentSuccess: true }));
         if (!result) return;
       }
 
@@ -1195,7 +1209,13 @@ export function OnboardingWizard() {
                     <Button
                       size="sm"
                       disabled={
-                        !agentName.trim() || loading || adapterEnvLoading
+                        !agentName.trim() ||
+                        !hasValidSelectedModel ||
+                        isOpenCodeModelLoading ||
+                        isOpenCodeModelUnavailable ||
+                        Boolean(adapterModelsError && adapterType === "opencode_local") ||
+                        loading ||
+                        adapterEnvLoading
                       }
                       onClick={handleStep2Next}
                     >

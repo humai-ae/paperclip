@@ -381,6 +381,7 @@ function buildWakeText(payload: WakePayload, paperclipEnv: Record<string, string
     `linked_issue_ids=${payload.issueIds.join(",")}`,
     "",
     "HTTP rules:",
+    "- ALL Paperclip API calls MUST use curl via the exec/bash tool. Do NOT use web_fetch — it blocks internal hostnames.",
     "- Use Authorization: Bearer $PAPERCLIP_API_KEY on every API call.",
     "- Use X-Paperclip-Run-Id: $PAPERCLIP_RUN_ID on every mutating API call.",
     "- Use only /api endpoints listed below.",
@@ -1027,10 +1028,11 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     };
   }
 
-  const timeoutSec = Math.max(0, Math.floor(asNumber(ctx.config.timeoutSec, 120)));
+  const MAX_WAIT_MS = 30 * 60 * 1000; // 30-minute hard limit when no explicit timeout is configured
+  const timeoutSec = Math.max(0, Math.floor(asNumber(ctx.config.timeoutSec, 0)));
   const timeoutMs = timeoutSec > 0 ? timeoutSec * 1000 : 0;
   const connectTimeoutMs = timeoutMs > 0 ? Math.min(timeoutMs, 15_000) : 10_000;
-  const waitTimeoutMs = parseOptionalPositiveInteger(ctx.config.waitTimeoutMs) ?? (timeoutMs > 0 ? timeoutMs : 30_000);
+  const waitTimeoutMs = parseOptionalPositiveInteger(ctx.config.waitTimeoutMs) ?? (timeoutMs > 0 ? timeoutMs : MAX_WAIT_MS);
 
   const payloadTemplate = parseObject(ctx.config.payloadTemplate);
   const transportHint = nonEmpty(ctx.config.streamTransport) ?? nonEmpty(ctx.config.transport);
