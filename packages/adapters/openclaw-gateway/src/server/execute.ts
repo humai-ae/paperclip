@@ -1034,7 +1034,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     };
   }
 
-  const MAX_WAIT_MS = 30 * 60 * 1000; // 30 minutes — effectively unlimited for agent runs
+  const MAX_WAIT_MS = 30 * 60 * 1000; // 30-minute hard limit when no explicit timeout is configured
   const timeoutSec = Math.max(0, Math.floor(asNumber(ctx.config.timeoutSec, 0)));
   const timeoutMs = timeoutSec > 0 ? timeoutSec * 1000 : 0;
   const connectTimeoutMs = timeoutMs > 0 ? Math.min(timeoutMs, 15_000) : 10_000;
