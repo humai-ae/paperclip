@@ -13,11 +13,22 @@ import { Button } from "@/components/ui/button";
 import {
   ArrowLeft,
   Bot,
+  Code,
+  Gem,
+  MousePointer2,
   Sparkles,
+  Terminal,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { OpenCodeLogoIcon } from "./OpenCodeLogoIcon";
 
-type AdvancedAdapterType = "crewdeck";
+type AdvancedAdapterType =
+  | "claude_local"
+  | "codex_local"
+  | "gemini_local"
+  | "opencode_local"
+  | "pi_local"
+  | "cursor";
 
 const ADVANCED_ADAPTER_OPTIONS: Array<{
   value: AdvancedAdapterType;
@@ -27,11 +38,42 @@ const ADVANCED_ADAPTER_OPTIONS: Array<{
   recommended?: boolean;
 }> = [
   {
-    value: "crewdeck",
-    label: "CrewDeck (Sandboxed)",
-    icon: Bot,
-    desc: "Runs in an isolated OpenShell sandbox",
+    value: "claude_local",
+    label: "Claude Code",
+    icon: Sparkles,
+    desc: "Local Claude agent profile",
     recommended: true,
+  },
+  {
+    value: "codex_local",
+    label: "Codex",
+    icon: Code,
+    desc: "Local Codex agent profile",
+    recommended: true,
+  },
+  {
+    value: "gemini_local",
+    label: "Gemini CLI",
+    icon: Gem,
+    desc: "Local Gemini agent profile",
+  },
+  {
+    value: "opencode_local",
+    label: "OpenCode",
+    icon: OpenCodeLogoIcon,
+    desc: "Local multi-provider profile",
+  },
+  {
+    value: "pi_local",
+    label: "Pi",
+    icon: Terminal,
+    desc: "Local Pi agent profile",
+  },
+  {
+    value: "cursor",
+    label: "Cursor",
+    icon: MousePointer2,
+    desc: "Local Cursor agent profile",
   },
 ];
 
@@ -143,7 +185,7 @@ export function NewAgentDialog() {
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 gap-2">
+              <div className="grid grid-cols-2 gap-2">
                 {ADVANCED_ADAPTER_OPTIONS.map((opt) => (
                   <button
                     key={opt.value}

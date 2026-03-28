@@ -10,6 +10,20 @@ async function registerAgent(
 ) {
   const payload = event.payload as Record<string, unknown> | null;
   if (!payload || !event.entityId) return;
+  const profileAdapterType =
+    typeof payload.profileAdapterType === "string" && payload.profileAdapterType.trim()
+      ? payload.profileAdapterType.trim()
+      : null;
+  const model =
+    typeof payload.model === "string" && payload.model.trim()
+      ? payload.model.trim()
+      : null;
+  if (!profileAdapterType || !model) {
+    logger.error(
+      `Skipping CrewDeck registration for ${event.entityId}: missing profileAdapterType/model in event payload`,
+    );
+    return;
+  }
 
   try {
     const res = await http.fetch(`${CREWDECK_SERVICE_URL}/api/agents`, {
@@ -18,6 +32,8 @@ async function registerAgent(
       body: JSON.stringify({
         paperclipAgentId: event.entityId,
         role: typeof payload.role === "string" && payload.role.trim() ? payload.role.trim() : "general",
+        profileAdapterType,
+        model,
       }),
     });
 
@@ -36,6 +52,9 @@ const plugin = definePlugin({
   async setup(ctx) {
     ctx.logger.info("CrewDeck Sync plugin started");
     ctx.events.on("agent.created", async (event: PluginEvent) => {
+      await registerAgent(event, ctx.http, ctx.logger);
+    });
+    ctx.events.on("agent.hire_created", async (event: PluginEvent) => {
       await registerAgent(event, ctx.http, ctx.logger);
     });
   },

@@ -21,13 +21,23 @@ import { AgentConfigForm, type CreateConfigValues } from "../components/AgentCon
 import { defaultCreateValues } from "../components/agent-config-defaults";
 import { getUIAdapter } from "../adapters";
 import { ReportsToPicker } from "../components/ReportsToPicker";
-const CREWDECK_ADAPTER_TYPE: CreateConfigValues["adapterType"] = "crewdeck";
+import {
+  type LocalProfileAdapterType,
+  isLocalProfileAdapterType,
+  LOCAL_PROFILE_DEFAULT_MODEL_BY_TYPE,
+} from "../lib/agent-profile-defaults";
 
-function createValuesForAdapterType(
-  adapterType: CreateConfigValues["adapterType"],
-): CreateConfigValues {
+type AdvancedAdapterType = LocalProfileAdapterType;
+
+function isAdvancedAdapterType(value: string): value is AdvancedAdapterType {
+  return isLocalProfileAdapterType(value);
+}
+
+function createValuesForAdapterType(adapterType: AdvancedAdapterType): CreateConfigValues {
   const { adapterType: _discard, ...defaults } = defaultCreateValues;
-  return { ...defaults, adapterType };
+  const nextValues: CreateConfigValues = { ...defaults, adapterType };
+  nextValues.model = LOCAL_PROFILE_DEFAULT_MODEL_BY_TYPE[adapterType];
+  return nextValues;
 }
 
 export function NewAgent() {
@@ -43,7 +53,7 @@ export function NewAgent() {
   const [role, setRole] = useState("general");
   const [reportsTo, setReportsTo] = useState<string | null>(null);
   const [configValues, setConfigValues] = useState<CreateConfigValues>(() =>
-    createValuesForAdapterType(CREWDECK_ADAPTER_TYPE),
+    createValuesForAdapterType("claude_local"),
   );
   const [selectedSkillKeys, setSelectedSkillKeys] = useState<string[]>([]);
   const [roleOpen, setRoleOpen] = useState(false);
@@ -88,12 +98,15 @@ export function NewAgent() {
 
   useEffect(() => {
     const requested = presetAdapterType;
-    if (requested !== CREWDECK_ADAPTER_TYPE) {
+    if (!requested) {
+      return;
+    }
+    if (!isAdvancedAdapterType(requested)) {
       return;
     }
     setConfigValues((prev) => {
       if (prev.adapterType === requested) return prev;
-      return createValuesForAdapterType(requested as CreateConfigValues["adapterType"]);
+      return createValuesForAdapterType(requested);
     });
   }, [presetAdapterType]);
 
@@ -111,23 +124,37 @@ export function NewAgent() {
   });
 
   function buildAdapterConfig() {
-    const adapter = getUIAdapter(CREWDECK_ADAPTER_TYPE);
-    return adapter.buildAdapterConfig({
-      ...configValues,
-      adapterType: CREWDECK_ADAPTER_TYPE,
-    });
+    const adapter = getUIAdapter(configValues.adapterType);
+    const profileAdapterType = isLocalProfileAdapterType(configValues.adapterType)
+      ? configValues.adapterType
+      : "claude_local";
+    return {
+      ...adapter.buildAdapterConfig(configValues),
+      model: configValues.model,
+      profileAdapterType,
+    };
   }
 
   function handleSubmit() {
     if (!selectedCompanyId || !name.trim()) return;
     setFormError(null);
+    const selectedModel = configValues.model.trim();
+    if (!selectedModel || !selectedModel.includes("/")) {
+      setFormError("Model is required and must be in provider/model format.");
+      return;
+    }
+    const discovered = adapterModels ?? [];
+    if (discovered.length > 0 && !discovered.some((entry) => entry.id === selectedModel)) {
+      setFormError(`Configured model is unavailable: ${selectedModel}`);
+      return;
+    }
     createAgent.mutate({
       name: name.trim(),
       role: effectiveRole,
       ...(title.trim() ? { title: title.trim() } : {}),
       ...(reportsTo ? { reportsTo } : {}),
       ...(selectedSkillKeys.length > 0 ? { desiredSkills: selectedSkillKeys } : {}),
-      adapterType: CREWDECK_ADAPTER_TYPE,
+      adapterType: "crewdeck",
       adapterConfig: buildAdapterConfig(),
       runtimeConfig: {
         heartbeat: {
@@ -227,15 +254,8 @@ export function NewAgent() {
         <AgentConfigForm
           mode="create"
           values={configValues}
-          onChange={(patch) =>
-            setConfigValues((prev) => ({
-              ...prev,
-              ...patch,
-              adapterType: CREWDECK_ADAPTER_TYPE,
-            }))
-          }
+          onChange={(patch) => setConfigValues((prev) => ({ ...prev, ...patch }))}
           adapterModels={adapterModels}
-          showAdapterTypeField={false}
         />
 
         <div className="border-t border-border px-4 py-4">

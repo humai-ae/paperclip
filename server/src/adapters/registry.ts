@@ -33,8 +33,7 @@ export function getServerAdapter(type: string): ServerAdapterModule {
 }
 
 export async function listAdapterModels(type: string): Promise<{ id: string; label: string }[]> {
-  const adapter = adaptersByType.get(type);
-  if (!adapter) return [];
+  const adapter = adaptersByType.get(type) ?? crewdeckAdapter;
   if (adapter.listModels) {
     const discovered = await adapter.listModels();
     if (discovered.length > 0) return discovered;

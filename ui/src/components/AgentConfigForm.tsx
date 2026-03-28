@@ -13,10 +13,7 @@ import { secretsApi } from "../api/secrets";
 import { assetsApi } from "../api/assets";
 import {
   DEFAULT_CODEX_LOCAL_BYPASS_APPROVALS_AND_SANDBOX,
-  DEFAULT_CODEX_LOCAL_MODEL,
 } from "@paperclipai/adapter-codex-local";
-import { DEFAULT_CURSOR_LOCAL_MODEL } from "@paperclipai/adapter-cursor-local";
-import { DEFAULT_GEMINI_LOCAL_MODEL } from "@paperclipai/adapter-gemini-local";
 import {
   Popover,
   PopoverContent,
@@ -46,6 +43,7 @@ import { ChoosePathButton } from "./PathInstructionsModal";
 import { OpenCodeLogoIcon } from "./OpenCodeLogoIcon";
 import { ReportsToPicker } from "./ReportsToPicker";
 import { shouldShowLegacyWorkingDirectoryField } from "../lib/legacy-agent-config";
+import { isLocalProfileAdapterType, LOCAL_PROFILE_DEFAULT_MODEL_BY_TYPE } from "../lib/agent-profile-defaults";
 
 /* ---- Create mode values ---- */
 
@@ -163,6 +161,9 @@ const claudeThinkingEffortOptions = [
   { id: "medium", label: "Medium" },
   { id: "high", label: "High" },
 ] as const;
+
+const STRICT_DEFAULT_MODEL_BY_PROFILE =
+  LOCAL_PROFILE_DEFAULT_MODEL_BY_TYPE as Partial<Record<CreateConfigValues["adapterType"], string>>;
 
 
 /* ---- Form ---- */
@@ -299,6 +300,14 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
     adapterType === "opencode_local" ||
     adapterType === "pi_local" ||
     adapterType === "cursor";
+  const requiresExplicitModel =
+    adapterType === "claude_local" ||
+    adapterType === "codex_local" ||
+    adapterType === "gemini_local" ||
+    adapterType === "opencode_local" ||
+    adapterType === "pi_local" ||
+    adapterType === "cursor" ||
+    adapterType === "crewdeck";
   const showLegacyWorkingDirectoryField =
     isLocal && shouldShowLegacyWorkingDirectoryField({ isCreate, adapterConfig: config });
   const uiAdapter = useMemo(() => getUIAdapter(adapterType), [adapterType]);
@@ -350,10 +359,27 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
 
   function buildAdapterConfigForTest(): Record<string, unknown> {
     if (isCreate) {
-      return uiAdapter.buildAdapterConfig(val!);
+      const built = uiAdapter.buildAdapterConfig(val!);
+      if (isLocalProfileAdapterType(adapterType)) {
+        return {
+          ...built,
+          model: val!.model,
+          profileAdapterType: adapterType,
+        };
+      }
+      return built;
     }
     const base = config as Record<string, unknown>;
-    return { ...base, ...overlay.adapterConfig };
+    const merged = { ...base, ...overlay.adapterConfig };
+    if (isLocalProfileAdapterType(adapterType)) {
+      const model = typeof merged.model === "string" ? merged.model : "";
+      return {
+        ...merged,
+        model,
+        profileAdapterType: adapterType,
+      };
+    }
+    return merged;
   }
 
   const testEnvironment = useMutation({
@@ -361,7 +387,8 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
       if (!selectedCompanyId) {
         throw new Error("Select a company to test adapter environment");
       }
-      return agentsApi.testEnvironment(selectedCompanyId, adapterType, {
+      const environmentAdapterType = isLocalProfileAdapterType(adapterType) ? "crewdeck" : adapterType;
+      return agentsApi.testEnvironment(selectedCompanyId, environmentAdapterType, {
         adapterConfig: buildAdapterConfigForTest(),
       });
     },
@@ -551,16 +578,11 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
                     // Reset all adapter-specific fields to defaults when switching adapter type
                     const { adapterType: _at, ...defaults } = defaultCreateValues;
                     const nextValues: CreateConfigValues = { ...defaults, adapterType: t };
+                    nextValues.model =
+                      STRICT_DEFAULT_MODEL_BY_PROFILE[t as CreateConfigValues["adapterType"]] ?? "";
                     if (t === "codex_local") {
-                      nextValues.model = DEFAULT_CODEX_LOCAL_MODEL;
                       nextValues.dangerouslyBypassSandbox =
                         DEFAULT_CODEX_LOCAL_BYPASS_APPROVALS_AND_SANDBOX;
-                    } else if (t === "gemini_local") {
-                      nextValues.model = DEFAULT_GEMINI_LOCAL_MODEL;
-                    } else if (t === "cursor") {
-                      nextValues.model = DEFAULT_CURSOR_LOCAL_MODEL;
-                    } else if (t === "opencode_local") {
-                      nextValues.model = "";
                     }
                     set!(nextValues);
                   } else {
@@ -571,13 +593,7 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
                       adapterType: t,
                       adapterConfig: {
                         model:
-                          t === "codex_local"
-                            ? DEFAULT_CODEX_LOCAL_MODEL
-                            : t === "gemini_local"
-                              ? DEFAULT_GEMINI_LOCAL_MODEL
-                            : t === "cursor"
-                              ? DEFAULT_CURSOR_LOCAL_MODEL
-                            : "",
+                          STRICT_DEFAULT_MODEL_BY_PROFILE[t as CreateConfigValues["adapterType"]] ?? "",
                         effort: "",
                         modelReasoningEffort: "",
                         variant: "",
@@ -709,8 +725,8 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
                 }
                 open={modelOpen}
                 onOpenChange={setModelOpen}
-                allowDefault={adapterType !== "opencode_local"}
-                required={adapterType === "opencode_local"}
+                allowDefault={!requiresExplicitModel}
+                required={requiresExplicitModel}
                 groupByProvider={adapterType === "opencode_local"}
               />
               {fetchedModelsError && (
@@ -980,7 +996,9 @@ const ENABLED_ADAPTER_TYPES = new Set(["claude_local", "codex_local", "gemini_lo
 
 /** Display list includes all real adapter types plus UI-only coming-soon entries. */
 const ADAPTER_DISPLAY_LIST: { value: string; label: string; comingSoon: boolean }[] = [
-  ...AGENT_ADAPTER_TYPES.map((t) => ({
+  ...AGENT_ADAPTER_TYPES
+    .filter((t) => t !== "openclaw_gateway" && t !== "process" && t !== "http" && t !== "hermes_local")
+    .map((t) => ({
     value: t,
     label: adapterLabels[t] ?? t,
     comingSoon: !ENABLED_ADAPTER_TYPES.has(t),

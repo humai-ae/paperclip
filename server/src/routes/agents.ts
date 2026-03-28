@@ -52,10 +52,7 @@ import { instanceSettingsService } from "../services/instance-settings.js";
 import { runClaudeLogin } from "@paperclipai/adapter-claude-local/server";
 import {
   DEFAULT_CODEX_LOCAL_BYPASS_APPROVALS_AND_SANDBOX,
-  DEFAULT_CODEX_LOCAL_MODEL,
 } from "@paperclipai/adapter-codex-local";
-import { DEFAULT_CURSOR_LOCAL_MODEL } from "@paperclipai/adapter-cursor-local";
-import { DEFAULT_GEMINI_LOCAL_MODEL } from "@paperclipai/adapter-gemini-local";
 import { ensureOpenCodeModelConfiguredAndAvailable } from "@paperclipai/adapter-opencode-local/server";
 import {
   loadDefaultAgentInstructionsBundle,
@@ -80,6 +77,17 @@ export function agentRoutes(db: Db) {
     "instructionsFilePath",
     "agentsMdPath",
   ] as const;
+  const ADAPTER_TYPES_REQUIRING_EXPLICIT_MODEL = new Set([
+    "claude_local",
+    "codex_local",
+    "gemini_local",
+    "opencode_local",
+    "pi_local",
+    "cursor",
+    "crewdeck",
+  ]);
+  const SUPPORTED_CREWDECK_PROFILE_ADAPTER_TYPES = Object.keys(DEFAULT_INSTRUCTIONS_PATH_KEYS).sort();
+  const SUPPORTED_CREWDECK_PROFILE_ADAPTER_TYPE_SET = new Set(SUPPORTED_CREWDECK_PROFILE_ADAPTER_TYPES);
 
   const router = Router();
   const svc = agentService(db);
@@ -383,9 +391,6 @@ export function agentRoutes(db: Db) {
   ): Record<string, unknown> {
     const next = { ...adapterConfig };
     if (adapterType === "codex_local") {
-      if (!asNonEmptyString(next.model)) {
-        next.model = DEFAULT_CODEX_LOCAL_MODEL;
-      }
       const hasBypassFlag =
         typeof next.dangerouslyBypassApprovalsAndSandbox === "boolean" ||
         typeof next.dangerouslyBypassSandbox === "boolean";
@@ -394,15 +399,42 @@ export function agentRoutes(db: Db) {
       }
       return ensureGatewayDeviceKey(adapterType, next);
     }
-    if (adapterType === "gemini_local" && !asNonEmptyString(next.model)) {
-      next.model = DEFAULT_GEMINI_LOCAL_MODEL;
-      return ensureGatewayDeviceKey(adapterType, next);
-    }
-    // OpenCode requires explicit model selection — no default
-    if (adapterType === "cursor" && !asNonEmptyString(next.model)) {
-      next.model = DEFAULT_CURSOR_LOCAL_MODEL;
-    }
     return ensureGatewayDeviceKey(adapterType, next);
+  }
+
+  function assertRequiredProviderOptions(
+    adapterType: string | null | undefined,
+    adapterConfig: Record<string, unknown>,
+  ) {
+    if (!adapterType || !ADAPTER_TYPES_REQUIRING_EXPLICIT_MODEL.has(adapterType)) return;
+
+    const model = asNonEmptyString(adapterConfig.model);
+    if (!model) {
+      throw unprocessable(`adapterConfig.model is required for adapter type '${adapterType}'`);
+    }
+    const slashIndex = model.indexOf("/");
+    if (slashIndex <= 0 || slashIndex === model.length - 1) {
+      throw unprocessable(
+        `adapterConfig.model must use provider/model format for adapter type '${adapterType}'`,
+      );
+    }
+
+    if (adapterType === "crewdeck") {
+      const profileAdapterType = asNonEmptyString(adapterConfig.profileAdapterType);
+      if (!profileAdapterType) {
+        throw unprocessable("adapterConfig.profileAdapterType is required for adapter type 'crewdeck'");
+      }
+      if (profileAdapterType === "crewdeck") {
+        throw unprocessable(
+          "adapterConfig.profileAdapterType must be a local profile adapter type, not 'crewdeck'",
+        );
+      }
+      if (!SUPPORTED_CREWDECK_PROFILE_ADAPTER_TYPE_SET.has(profileAdapterType)) {
+        throw unprocessable(
+          `adapterConfig.profileAdapterType must be one of ${SUPPORTED_CREWDECK_PROFILE_ADAPTER_TYPES.join(", ")}, received '${profileAdapterType}'`,
+        );
+      }
+    }
   }
 
   async function assertAdapterConfigConstraints(
@@ -1182,6 +1214,10 @@ export function agentRoutes(db: Db) {
       hireInput.adapterType,
       normalizedAdapterConfig,
     );
+    assertRequiredProviderOptions(
+      hireInput.adapterType,
+      normalizedAdapterConfig,
+    );
     const normalizedHireInput = {
       ...hireInput,
       adapterConfig: normalizedAdapterConfig,
@@ -1280,6 +1316,9 @@ export function agentRoutes(db: Db) {
       details: {
         name: agent.name,
         role: agent.role,
+        adapterType: agent.adapterType,
+        profileAdapterType: asNonEmptyString(asRecord(agent.adapterConfig)?.profileAdapterType),
+        model: asNonEmptyString(asRecord(agent.adapterConfig)?.model),
         requiresApproval,
         approvalId: approval?.id ?? null,
         issueIds: sourceIssueIds,
@@ -1342,6 +1381,10 @@ export function agentRoutes(db: Db) {
       createInput.adapterType,
       normalizedAdapterConfig,
     );
+    assertRequiredProviderOptions(
+      createInput.adapterType,
+      normalizedAdapterConfig,
+    );
 
     const createdAgent = await svc.create(companyId, {
       ...createInput,
@@ -1365,6 +1408,9 @@ export function agentRoutes(db: Db) {
       details: {
         name: agent.name,
         role: agent.role,
+        adapterType: agent.adapterType,
+        profileAdapterType: asNonEmptyString(asRecord(agent.adapterConfig)?.profileAdapterType),
+        model: asNonEmptyString(asRecord(agent.adapterConfig)?.model),
         desiredSkills: desiredSkillAssignment.desiredSkills,
       },
     });
@@ -1758,6 +1804,10 @@ export function agentRoutes(db: Db) {
         existing.companyId,
         effectiveAdapterConfig,
         { strictMode: strictSecretsMode },
+      );
+      assertRequiredProviderOptions(
+        requestedAdapterType,
+        normalizedEffectiveAdapterConfig,
       );
       patchData.adapterConfig = syncInstructionsBundleConfigFromFilePath(existing, normalizedEffectiveAdapterConfig);
     }
