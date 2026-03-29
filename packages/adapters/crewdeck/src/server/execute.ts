@@ -147,7 +147,7 @@ export async function readNdjsonResponse(
         } else if (event.type === "result") {
           if (event.ready) {
             result = event as unknown as EnsureReadySuccess;
-            reader.cancel();
+            await reader.cancel().catch(() => {});
             return result;
           } else {
             return {
