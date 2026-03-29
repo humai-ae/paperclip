@@ -150,6 +150,7 @@ export async function readNdjsonResponse(
             await reader.cancel().catch(() => {});
             return result;
           } else {
+            await reader.cancel().catch(() => {});
             return {
               ready: false,
               error: typeof event.error === "string" ? event.error : "Service error",
