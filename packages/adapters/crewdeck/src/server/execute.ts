@@ -115,7 +115,7 @@ export async function readNdjsonResponse(
     try {
       const json = JSON.parse(text) as Record<string, unknown>;
       if (json.ready === false && typeof json.error === "string") {
-        return json as unknown as EnsureReadyError;
+        return { ready: false, error: json.error as string, errorCode: (typeof json.errorCode === "string" ? json.errorCode : "crewdeck_service_error") };
       }
       return json as unknown as EnsureReadySuccess;
     } catch {}
@@ -147,6 +147,8 @@ export async function readNdjsonResponse(
         } else if (event.type === "result") {
           if (event.ready) {
             result = event as unknown as EnsureReadySuccess;
+            reader.cancel();
+            return result;
           } else {
             return {
               ready: false,
@@ -428,7 +430,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   const ensureReadySec = ((Date.now() - ensureReadyStart) / 1000).toFixed(1);
   await ctx.onLog(
     "stdout",
-    `[crewdeck] sandbox ready in ${ensureReadySec}s (port: ${status.gatewayPort}, created: ${status.sandboxCreated}, restored: ${status.workspaceRestored}, gateway: ${status.gatewayStarted ? "started" : "existed"})\n`,
+    `[crewdeck] sandbox ready in ${ensureReadySec}s (port: ${status.gatewayPort}, created: ${status.sandboxCreated ?? false}, restored: ${status.workspaceRestored ?? false}, gateway: ${status.gatewayStarted ? "started" : "existed"})\n`,
   );
 
   const configuredPaperclipApiUrl = asNonEmptyString((ctx.config as Record<string, unknown>).paperclipApiUrl);
