@@ -145,7 +145,7 @@ export async function readNdjsonResponse(
         if (event.type === "step" && onLog) {
           await onLog("stdout", `[crewdeck] ${event.step}: ${event.status}\n`);
         } else if (event.type === "result") {
-          if (event.ready) {
+          if (event.ready === true && typeof event.gatewayPort === "number") {
             result = event as unknown as EnsureReadySuccess;
             await reader.cancel().catch(() => {});
             return result;
@@ -169,7 +169,7 @@ export async function readNdjsonResponse(
   if (flushed) {
     try {
       const event = JSON.parse(flushed) as Record<string, unknown>;
-      if (event.type === "result" && event.ready) {
+      if (event.type === "result" && event.ready === true && typeof event.gatewayPort === "number") {
         result = event as unknown as EnsureReadySuccess;
       } else if (event.type === "result") {
         return { ready: false, error: typeof event.error === "string" ? event.error : "Service error", errorCode: "crewdeck_service_error" } as EnsureReadyError;
