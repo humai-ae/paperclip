@@ -114,10 +114,10 @@ export async function readNdjsonResponse(
     const text = await res.text();
     try {
       const json = JSON.parse(text) as Record<string, unknown>;
-      if (json.ready === false) {
-        return { ready: false, error: typeof json.error === "string" ? json.error : "Service returned failure", errorCode: typeof json.errorCode === "string" ? json.errorCode : "crewdeck_service_error" };
+      if (json.ready === true && typeof json.gatewayPort === "number") {
+        return json as unknown as EnsureReadySuccess;
       }
-      return json as unknown as EnsureReadySuccess;
+      return { ready: false, error: typeof json.error === "string" ? json.error : "Service returned unexpected response", errorCode: typeof json.errorCode === "string" ? json.errorCode : "crewdeck_service_error" };
     } catch {}
     return { ready: false, error: text || "Empty response", errorCode: "crewdeck_service_error" };
   }
