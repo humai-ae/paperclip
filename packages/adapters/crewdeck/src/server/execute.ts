@@ -233,21 +233,6 @@ async function ensureReady(
   );
 }
 
-const ENSURE_CONNECTIVITY_TIMEOUT_MS = 60_000;
-
-async function ensureConnectivity(
-  agentId: string,
-  runApiKey: string,
-  onLog?: (stream: "stdout" | "stderr", msg: string) => Promise<void>,
-): Promise<EnsureReadyResult> {
-  return servicePost(
-    `${CREWDECK_SERVICE_URL}/api/sandbox/${agentId}/ensure-connectivity`,
-    JSON.stringify({ runApiKey }),
-    ENSURE_CONNECTIVITY_TIMEOUT_MS,
-    onLog,
-  );
-}
-
 async function syncBack(agentId: string): Promise<void> {
   try {
     await fetch(`${CREWDECK_SERVICE_URL}/api/sandbox/${agentId}/sync-back`, { method: "POST" });
@@ -593,7 +578,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       "[crewdeck] provider auth failure detected; checking connectivity and retrying once\n",
     );
     await ctx.onLog("stdout", "[crewdeck] retry: checking connectivity...\n");
-    const refreshed = await ensureConnectivity(agentId, runApiKey, ctx.onLog);
+    const refreshed = await ensureReady(agentId, runApiKey, { profileAdapterType, model }, ctx.onLog);
     if (!refreshed.ready) {
       const err = refreshed as EnsureReadyError;
       await ctx.onLog("stderr", `[crewdeck] retry: connectivity check failed (${err.errorCode}): ${err.error}\n`);
@@ -651,7 +636,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       "[crewdeck] gateway connectivity failure detected; checking connectivity and retrying once\n",
     );
     await ctx.onLog("stdout", "[crewdeck] retry: checking connectivity...\n");
-    const refreshed = await ensureConnectivity(agentId, runApiKey, ctx.onLog);
+    const refreshed = await ensureReady(agentId, runApiKey, { profileAdapterType, model }, ctx.onLog);
     if (!refreshed.ready) {
       const err = refreshed as EnsureReadyError;
       await ctx.onLog("stderr", `[crewdeck] retry: connectivity check failed (${err.errorCode}): ${err.error}\n`);
