@@ -297,32 +297,7 @@ export async function createApp(
       async (pluginId) => (await pluginRegistry.getById(pluginId))?.packagePath ?? null,
     )
     : null;
-  // ── CrewDeck: auto-install crewdeck-sync plugin if CREWDECK_SERVICE_URL is set ──
-  void (async () => {
-    if (!process.env.CREWDECK_SERVICE_URL) {
-      return;
-    }
-    try {
-      let crewdeckSync = await pluginRegistry.getByKey("crewdeck.sync");
-      if (!crewdeckSync || crewdeckSync.status === "uninstalled") {
-        const crewdeckPluginPath = path.resolve(__dirname, "../../packages/plugins/examples/plugin-crewdeck-sync");
-        if (fs.existsSync(crewdeckPluginPath)) {
-          logger.info("Auto-installing crewdeck-sync plugin...");
-          await loader.installPlugin({ localPath: crewdeckPluginPath });
-          logger.info("crewdeck-sync plugin installed");
-          crewdeckSync = await pluginRegistry.getByKey("crewdeck.sync");
-        }
-      }
-
-      // Auto-install leaves plugins in "installed". Move to "ready" so loadAll activates it.
-      if (crewdeckSync && crewdeckSync.status !== "ready") {
-        await pluginRegistry.updateStatus(crewdeckSync.id, { status: "ready" });
-        logger.info({ pluginId: crewdeckSync.id }, "crewdeck-sync plugin marked ready");
-      }
-    } catch (err) {
-      logger.warn({ err }, "Failed to auto-install crewdeck-sync plugin");
-    }
-  })().then(() => loader.loadAll()).then((result) => {
+  void loader.loadAll().then((result) => {
     if (!result) return;
     for (const loaded of result.results) {
       if (devWatcher && loaded.success && loaded.plugin.packagePath) {

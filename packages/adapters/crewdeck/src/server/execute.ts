@@ -16,6 +16,10 @@ interface EnsureReadySuccess {
   ready: true;
   gatewayPort: number;
   gatewayToken: string | null;
+  sandboxCreated?: boolean;
+  workspaceRestored?: boolean;
+  gatewayStarted?: boolean;
+  forwardStarted?: boolean;
 }
 
 interface EnsureReadyError {
@@ -96,28 +100,110 @@ function resolveSandboxPaperclipApiUrl(): string {
   }
 }
 
-async function ensureReady(
-  agentId: string,
-  runApiKey: string,
-  options: { profileAdapterType: string; model: string; forceRuntimeProbe?: boolean },
+/**
+ * Read an NDJSON stream from the service. Logs each step line in real-time
+ * and returns the final result object.
+ */
+export async function readNdjsonResponse(
+  res: Response,
+  onLog?: (stream: "stdout" | "stderr", msg: string) => Promise<void>,
+): Promise<EnsureReadyResult> {
+  const reader = res.body?.getReader();
+  if (!reader) {
+    // No streaming body — fall back to reading the full response as JSON.
+    const text = await res.text();
+    try {
+      const json = JSON.parse(text) as Record<string, unknown>;
+      if (json.ready === true && typeof json.gatewayPort === "number") {
+        return json as unknown as EnsureReadySuccess;
+      }
+      return { ready: false, error: typeof json.error === "string" ? json.error : "Service returned unexpected response", errorCode: typeof json.errorCode === "string" ? json.errorCode : "crewdeck_service_error" };
+    } catch {}
+    return { ready: false, error: text || "Empty response", errorCode: "crewdeck_service_error" };
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let result: EnsureReadyResult | null = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      buffer += decoder.decode(); // flush remaining bytes
+      break;
+    }
+    buffer += decoder.decode(value, { stream: true });
+
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+
+    for (const rawLine of lines) {
+      const line = rawLine.replace(/\r$/, "");
+      if (!line.trim()) continue;
+      try {
+        const event = JSON.parse(line) as Record<string, unknown>;
+        if (event.type === "step" && onLog) {
+          await onLog("stdout", `[crewdeck] ${event.step}: ${event.status}\n`);
+        } else if (event.type === "result") {
+          if (event.ready === true && typeof event.gatewayPort === "number") {
+            result = event as unknown as EnsureReadySuccess;
+            await reader.cancel().catch(() => {});
+            return result;
+          } else {
+            await reader.cancel().catch(() => {});
+            return {
+              ready: false,
+              error: typeof event.error === "string" ? event.error : "Service error",
+              errorCode: "crewdeck_service_error",
+            } as EnsureReadyError;
+          }
+        }
+      } catch {
+        if (onLog) await onLog("stderr", `[crewdeck] malformed NDJSON line: ${line.slice(0, 120)}\n`);
+      }
+    }
+  }
+
+  // Flush remaining buffer
+  const flushed = buffer.replace(/\r$/, "").trim();
+  if (flushed) {
+    try {
+      const event = JSON.parse(flushed) as Record<string, unknown>;
+      if (event.type === "result" && event.ready === true && typeof event.gatewayPort === "number") {
+        result = event as unknown as EnsureReadySuccess;
+      } else if (event.type === "result") {
+        return { ready: false, error: typeof event.error === "string" ? event.error : "Service error", errorCode: "crewdeck_service_error" } as EnsureReadyError;
+      }
+    } catch {
+      if (onLog) await onLog("stderr", `[crewdeck] malformed NDJSON line: ${buffer.slice(0, 120)}\n`);
+    }
+  }
+
+  return result ?? { ready: false, error: "No result from service", errorCode: "crewdeck_service_error" };
+}
+
+async function servicePost(
+  url: string,
+  body: string,
+  timeoutMs: number,
+  onLog?: (stream: "stdout" | "stderr", msg: string) => Promise<void>,
 ): Promise<EnsureReadyResult> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), ENSURE_READY_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(`${CREWDECK_SERVICE_URL}/api/sandbox/${agentId}/ensure-ready`, {
+    const res = await fetch(url, {
       method: "POST",
       headers: { "content-type": "application/json" },
       signal: controller.signal,
-      body: JSON.stringify({
-        runApiKey,
-        profileAdapterType: options.profileAdapterType,
-        model: options.model,
-        forceRuntimeProbe: options.forceRuntimeProbe ?? false,
-      }),
+      body,
     });
     if (res.status === 404) {
       return { ready: false, error: "Agent not registered with CrewDeck Service", errorCode: "crewdeck_agent_not_found" };
     }
+    if (res.headers.get("content-type")?.includes("ndjson")) {
+      return await readNdjsonResponse(res, onLog);
+    }
+    // Fallback for non-streaming responses
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       return { ready: false, error: `CrewDeck Service error (${res.status}): ${text}`, errorCode: "crewdeck_service_error" };
@@ -125,16 +211,41 @@ async function ensureReady(
     return (await res.json()) as EnsureReadySuccess;
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {
-      return {
-        ready: false,
-        error: `CrewDeck Service timed out after ${Math.round(ENSURE_READY_TIMEOUT_MS / 1000)}s during ensure-ready`,
-        errorCode: "crewdeck_service_timeout",
-      };
+      return { ready: false, error: `CrewDeck Service timed out after ${Math.round(timeoutMs / 1000)}s`, errorCode: "crewdeck_service_timeout" };
     }
     return { ready: false, error: `CrewDeck Service unreachable: ${err instanceof Error ? err.message : String(err)}`, errorCode: "crewdeck_service_unreachable" };
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function ensureReady(
+  agentId: string,
+  runApiKey: string,
+  options: { profileAdapterType: string; model: string },
+  onLog?: (stream: "stdout" | "stderr", msg: string) => Promise<void>,
+): Promise<EnsureReadyResult> {
+  return servicePost(
+    `${CREWDECK_SERVICE_URL}/api/sandbox/${agentId}/ensure-ready`,
+    JSON.stringify({ runApiKey, profileAdapterType: options.profileAdapterType, model: options.model }),
+    ENSURE_READY_TIMEOUT_MS,
+    onLog,
+  );
+}
+
+const ENSURE_CONNECTIVITY_TIMEOUT_MS = 60_000;
+
+async function ensureConnectivity(
+  agentId: string,
+  runApiKey: string,
+  onLog?: (stream: "stdout" | "stderr", msg: string) => Promise<void>,
+): Promise<EnsureReadyResult> {
+  return servicePost(
+    `${CREWDECK_SERVICE_URL}/api/sandbox/${agentId}/ensure-connectivity`,
+    JSON.stringify({ runApiKey }),
+    ENSURE_CONNECTIVITY_TIMEOUT_MS,
+    onLog,
+  );
 }
 
 async function syncBack(agentId: string): Promise<void> {
@@ -298,10 +409,16 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       errorMessage: "CrewDeck requires adapterConfig.model for strict provisioning.",
     };
   }
-  const status = await ensureReady(agentId, runApiKey, { profileAdapterType, model });
+  await ctx.onLog("stdout", `[crewdeck] run ${ctx.runId} starting for agent ${agentId}\n`);
+  await ctx.onLog("stdout", `[crewdeck] profile: ${profileAdapterType} model: ${model}\n`);
+
+  await ctx.onLog("stdout", "[crewdeck] connecting to crewdeck service...\n");
+  const ensureReadyStart = Date.now();
+  const status = await ensureReady(agentId, runApiKey, { profileAdapterType, model }, ctx.onLog);
 
   if (!status.ready) {
     const err = status as EnsureReadyError;
+    await ctx.onLog("stderr", `[crewdeck] ensure-ready failed (${err.errorCode}): ${err.error}\n`);
     return {
       exitCode: 1,
       signal: null,
@@ -310,6 +427,12 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       errorCode: err.errorCode,
     };
   }
+
+  const ensureReadySec = ((Date.now() - ensureReadyStart) / 1000).toFixed(1);
+  await ctx.onLog(
+    "stdout",
+    `[crewdeck] sandbox ready in ${ensureReadySec}s (port: ${status.gatewayPort}, created: ${status.sandboxCreated ?? false}, restored: ${status.workspaceRestored ?? false}, gateway: ${status.gatewayStarted ? "started" : "existed"})\n`,
+  );
 
   const configuredPaperclipApiUrl = asNonEmptyString((ctx.config as Record<string, unknown>).paperclipApiUrl);
   const paperclipApiUrl = configuredPaperclipApiUrl ?? resolveSandboxPaperclipApiUrl();
@@ -435,11 +558,18 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     };
   };
 
+  await ctx.onLog("stdout", `[crewdeck] connecting to gateway ws://localhost:${status.gatewayPort}...\n`);
+  const runStart = Date.now();
   const attempt = await runOnce(status);
+  const runDurationSec = ((Date.now() - runStart) / 1000).toFixed(1);
   const result = attempt.result;
   const transient = attempt.transient;
   const auth = attempt.auth;
   const approval = attempt.approval;
+  await ctx.onLog(
+    "stdout",
+    `[crewdeck] run completed in ${runDurationSec}s (exitCode: ${result.exitCode ?? "null"}, outputTokens: ${result.usage?.outputTokens ?? 0})\n`,
+  );
 
   if (transient.matched) {
     await ctx.onLog(
@@ -460,15 +590,18 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   if (auth.matched) {
     await ctx.onLog(
       "stderr",
-      "[crewdeck] provider auth failure detected; re-running ensure-ready and retrying once\n",
+      "[crewdeck] provider auth failure detected; checking connectivity and retrying once\n",
     );
-    const refreshed = await ensureReady(agentId, runApiKey, {
-      profileAdapterType,
-      model,
-      forceRuntimeProbe: true,
-    });
+    await ctx.onLog("stdout", "[crewdeck] retry: checking connectivity...\n");
+    const refreshed = await ensureConnectivity(agentId, runApiKey, ctx.onLog);
+    if (!refreshed.ready) {
+      const err = refreshed as EnsureReadyError;
+      await ctx.onLog("stderr", `[crewdeck] retry: connectivity check failed (${err.errorCode}): ${err.error}\n`);
+    }
     if (refreshed.ready) {
+      await ctx.onLog("stdout", `[crewdeck] retry: connected (port: ${refreshed.gatewayPort}, gateway: ${refreshed.gatewayStarted ? "restarted" : "ok"}, forward: ${refreshed.forwardStarted ? "restarted" : "ok"})\n`);
       const retry = await runOnce(refreshed);
+      await ctx.onLog("stdout", `[crewdeck] retry: run completed (exitCode: ${retry.result.exitCode ?? "null"})\n`);
       if (retry.transient.matched) {
         await ctx.onLog(
           "stderr",
@@ -515,11 +648,18 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   if (isGatewayConnectivityFailure(result)) {
     await ctx.onLog(
       "stderr",
-      "[crewdeck] gateway connectivity failure detected; re-running ensure-ready and retrying once\n",
+      "[crewdeck] gateway connectivity failure detected; checking connectivity and retrying once\n",
     );
-    const refreshed = await ensureReady(agentId, runApiKey, { profileAdapterType, model });
+    await ctx.onLog("stdout", "[crewdeck] retry: checking connectivity...\n");
+    const refreshed = await ensureConnectivity(agentId, runApiKey, ctx.onLog);
+    if (!refreshed.ready) {
+      const err = refreshed as EnsureReadyError;
+      await ctx.onLog("stderr", `[crewdeck] retry: connectivity check failed (${err.errorCode}): ${err.error}\n`);
+    }
     if (refreshed.ready) {
+      await ctx.onLog("stdout", `[crewdeck] retry: connected (port: ${refreshed.gatewayPort}, gateway: ${refreshed.gatewayStarted ? "restarted" : "ok"}, forward: ${refreshed.forwardStarted ? "restarted" : "ok"})\n`);
       const retry = await runOnce(refreshed);
+      await ctx.onLog("stdout", `[crewdeck] retry: run completed (exitCode: ${retry.result.exitCode ?? "null"})\n`);
       if (retry.transient.matched) {
         await ctx.onLog(
           "stderr",
@@ -562,7 +702,9 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     }
   }
 
+  await ctx.onLog("stdout", "[crewdeck] syncing workspace snapshot...\n");
   await syncBack(agentId);
+  await ctx.onLog("stdout", "[crewdeck] sync complete\n");
 
   // Guard: if the adapter returned success but the agent didn't actually complete
   // the workflow (e.g. it spawned sub-agents and the main session exited early),
@@ -582,7 +724,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       const issueId = asNonEmptyString(ctx.context.issueId) ?? asNonEmptyString(ctx.context.taskId);
       if (issueId && runApiKey) {
         await ctx.onLog(
-          "stderr",
+          "stdout",
           "[crewdeck] no completion signal — sub-agents may still be working; polling issue status...\n",
         );
         // Poll from the host side (not sandbox), so use the host-reachable Paperclip URL.
@@ -604,7 +746,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
               const issue = (await res.json()) as Record<string, unknown>;
               const status = typeof issue.status === "string" ? issue.status.toLowerCase() : "";
               await ctx.onLog(
-                "stderr",
+                "stdout",
                 `[crewdeck] polling issue ${issueId}: status=${status} (${Math.round((Date.now() - pollStart) / 1000)}s elapsed)\n`,
               );
               if (status === "done" || status === "cancelled") {
@@ -618,7 +760,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         }
 
         if (issueCompleted) {
-          await ctx.onLog("stderr", "[crewdeck] issue completed by sub-agent; marking run as succeeded\n");
+          await ctx.onLog("stdout", "[crewdeck] issue completed by sub-agent; marking run as succeeded\n");
           return result;
         }
 
