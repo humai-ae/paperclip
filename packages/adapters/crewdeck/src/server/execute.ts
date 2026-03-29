@@ -702,7 +702,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     !result.errorMessage
   ) {
     const summary = typeof result.summary === "string" ? result.summary : "";
-    const logText = assistantLog.join("");
+    const logText = assistantLog.join("\n");
     let hasCompletionSignal = COMPLETION_SIGNAL_RE.test(summary) || COMPLETION_SIGNAL_RE.test(logText);
     if (!hasCompletionSignal && result.resultJson) {
       hasCompletionSignal = COMPLETION_SIGNAL_RE.test(JSON.stringify(result.resultJson));
