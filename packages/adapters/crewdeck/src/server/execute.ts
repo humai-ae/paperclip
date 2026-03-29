@@ -703,9 +703,11 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   ) {
     const summary = typeof result.summary === "string" ? result.summary : "";
     const logText = assistantLog.join("\n");
-    let hasCompletionSignal = COMPLETION_SIGNAL_RE.test(summary) || COMPLETION_SIGNAL_RE.test(logText);
+    let hasCompletionSignal =
+      COMPLETION_SIGNAL_RE.test(summary) ||
+      logText.includes("CREWDECK_RUN_COMPLETE");
     if (!hasCompletionSignal && result.resultJson) {
-      hasCompletionSignal = COMPLETION_SIGNAL_RE.test(JSON.stringify(result.resultJson));
+      hasCompletionSignal = JSON.stringify(result.resultJson).includes("CREWDECK_RUN_COMPLETE");
     }
 
     if (!hasCompletionSignal) {
