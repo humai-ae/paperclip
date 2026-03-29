@@ -421,6 +421,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
 
   const configuredPaperclipApiUrl = asNonEmptyString((ctx.config as Record<string, unknown>).paperclipApiUrl);
   const paperclipApiUrl = configuredPaperclipApiUrl ?? resolveSandboxPaperclipApiUrl();
+  const assistantLog: string[] = [];
 
   const runOnce = async (ready: EnsureReadySuccess): Promise<{
     result: AdapterExecutionResult;
@@ -452,7 +453,6 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     let transientFromLogs: string | null = null;
     let authFromLogs: string | null = null;
     let approvalFromLogs: string | null = null;
-    const assistantLog: string[] = [];
     const result = await openclawExecute({
       ...ctx,
       onLog: async (stream, chunk) => {
